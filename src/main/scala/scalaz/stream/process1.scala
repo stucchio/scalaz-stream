@@ -144,7 +144,7 @@ trait process1 {
 
   /** Skips any elements of the input not matching the predicate. */
   def filter[I](f: I => Boolean): Process1[I,I] =
-    await1[I] flatMap (i => if (f(i)) emit(i) else halt) repeat
+    await1[I] flatMap (i => if (f(i)) emit(i) fby filter(f) else filter(f))
 
   /**
    * Skips any elements not satisfying predicate and when found, will emit that
@@ -222,7 +222,7 @@ trait process1 {
 
   /** Repeatedly echo the input; satisfies `x |> id == x` and `id |> x == x`. */
   def id[I]: Process1[I,I] =
-    await1[I].repeat
+    await1[I].flatMap(i=>emit(i) fby id)
 
   /**
    * Emit the given values, then echo the rest of the input.
