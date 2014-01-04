@@ -14,7 +14,7 @@ import scalaz.stream.actor.{WyeActor, message, actors}
 import scala.Some
 import scalaz.\/-
 import scalaz.-\/
-import scalaz.stream.tee.{AwaitR_, AwaitL_, AwaitR, AwaitL}
+import scalaz.stream.tee.{AwaitR, AwaitL}
 
 
 /**
@@ -692,7 +692,7 @@ sealed abstract class Process[+F[_],+O] {
     t match {
       case h@Halt(rsn) => this.killBy(rsn) onComplete p2.killBy(rsn) onComplete h
       case Emit(h, t2) => Emit(h, this.tee(p2)(t2))
-      case AwaitL_(recvt) =>  this match {
+      case AwaitL(recvt) =>  this match {
         case Emit(h,t2) =>
           val (out,next) = scalaz.stream.tee.feedL[O,O2,O3](h)(t).unemit
           Emit(out,t2.tee(p2)(next))
@@ -704,7 +704,7 @@ sealed abstract class Process[+F[_],+O] {
         case h@Halt(rsn) =>
           h.tee(p2)(recvt.runSafely(left(rsn)))
       }
-      case AwaitR_(recvt) =>
+      case AwaitR(recvt) =>
         p2 match {
         case Emit(h,t2) =>
           val (out,next) = scalaz.stream.tee.feedR[O,O2,O3](h.asInstanceOf[Seq[O2]])(t).unemit
