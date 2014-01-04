@@ -682,23 +682,32 @@ sealed abstract class Process[+F[_],+O] {
    * we gracefully kill off the other side, then halt.
    */
   final def tee[F2[x]>:F[x],O2,O3](p2: Process[F2,O2])(t: Tee[O,O2,O3]): Process[F2,O3] = {
+    //typecase below are ok, hence feedL/feedR cannot turn tee to wye ...
+    //other typecasting is just bacuase scala cannot infere and prove some types correctly...
     t match {
-      case h@Halt(_) => this.kill onComplete p2.kill onComplete h
+      case h@Halt(rsn) => this.killBy(rsn) onComplete p2.killBy(rsn) onComplete h
       case Emit(h, t2) => Emit(h, this.tee(p2)(t2))
-      case AwaitL_(recv) => this.stepT.flatMap {
-       s => s.fold(
-         hd => s.tail.run.tee(p2)(scalaz.stream.tee.feedL(hd)(t))
-         , halt.tee(p2)(recv(-\/(End)).run)
-         , e => halt.tee(p2)(recv(-\/(e)).run)
-       )
+      case AwaitL_(recvt) =>  this match {
+        case Emit(h,t2) =>
+          val (out,next) = wye.feedL[O,O2,O3](h)(t).unemit
+          Emit(out,t2.tee(p2)(next.asInstanceOf[Tee[O,O2,O3]]))
+        case Await_(req,recv) => await_[F2,Any,O3](req)(r => recv(r).map(p=>p.tee(p2)(t)))
+        case h@Halt(rsn) =>
+          val(out,next) = t.cleanupBy(rsn).unemit
+          Emit(out,p2.killBy(rsn) onComplete h)
       }
-      case AwaitR_(recv) => p2.stepT.flatMap {
-        s => s.fold(
-          hd => this.tee(s.tail.run)(scalaz.stream.tee.feedR(hd)(t))
-          , this.tee(halt)(recv(-\/(End)).run)
-          , e => this.tee(halt)(recv(-\/(e)).run)
-        )
+      case AwaitR_(recvt) =>
+        p2 match {
+        case Emit(h,t2) =>
+          val (out,next) = wye.feedR[O,O2,O3](h.asInstanceOf[Seq[O2]])(t).unemit
+          Emit(out,this.tee[F2,O2,O3](t2.asInstanceOf[Process[F2,O2]])(next.asInstanceOf[Tee[O,O2,O3]]))
+        case Await_(req,recv) =>
+          await_[F2,Any,O3](req.asInstanceOf[F2[Any]])(r => recv(r).map(p=>this.tee[F2,O2,O3](p.asInstanceOf[Process[F2,O2]])(t)))
+        case h@Halt(rsn) =>
+          val(out,next) = t.cleanupBy(rsn).unemit
+          Emit(out,this.killBy(rsn) onComplete h)
       }
+
     }
 
 
@@ -1301,6 +1310,8 @@ object Process {
 
 
 
+  def await_[F[_],R,A](req:F[R])(recv: Throwable \/ R => Trampoline[Process[F,A]]): Process[F,A] =
+    Await_[F,R,A](req, r => recv(r))
 
 
 
@@ -1767,6 +1778,37 @@ object Process {
       }
       go(self, input)
     }
+  }
+
+  /** Helpers for running Trampolined receive to obtain various next steps from recv of Await **/
+  implicit class ReceiveSyntax[F[_],R,A](val self: Throwable \/ R => Trampoline[Process[F,A]]) extends AnyVal {
+
+    /**
+     * Runs receive for getting next process with supplied r.
+     * If that fails, runs it again with given reason for failure to try to obtain fallback // cleanup,
+     * If that fails, returns Halt with reason for failure
+     * @param r
+     */
+    def runSafely(r:Throwable \/ R) : Process[F,A] = {
+      try self(r).run
+      catch {
+        case t : Throwable => try self(left(t)).run catch { case t0: Throwable => Halt(CausedBy(t0,t))}
+      }
+    }
+
+    /**
+     * Runs this receive to get next fallback
+     */
+    def runFallback : Process[F,A] =
+      runSafely(left(End))
+
+    /**
+     * Runs this receive to get next cleanup with supplied reason
+     */
+    def runCleanup(rsn:Throwable) : Process[F,A] =
+      runSafely(left(rsn))
+
+
   }
 
   /**

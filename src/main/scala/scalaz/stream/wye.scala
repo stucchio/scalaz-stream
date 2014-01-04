@@ -16,6 +16,18 @@ import scalaz.stream.Process.Env
 import scalaz.stream.ReceiveY.HaltR
 import scalaz.stream.Process.Await
 import scalaz.stream.ReceiveY.HaltL
+import scalaz.Free._
+import scalaz.stream.Process.Emit
+import scalaz.stream.ReceiveY.ReceiveL
+import scala.Some
+import scalaz.stream.Process.await
+import scalaz.\/-
+import scalaz.-\/
+import scalaz.stream.ReceiveY.ReceiveR
+import scalaz.stream.Process.Halt
+import scalaz.stream.Process.Env
+import scalaz.stream.ReceiveY.HaltR
+import scalaz.stream.ReceiveY.HaltL
 
 trait wye {
 
@@ -276,25 +288,15 @@ object wye extends wye {
       if (in.nonEmpty) cur match {
         case h@Halt(_) => emitSeq(out.flatten, h)
         case Emit(h, t) => go(in, out :+ h, t)
-        case AwaitL(recv, fb, c) =>
-          val next =
-            try recv(in.head)
-            catch {
-              case End => fb
-              case e: Throwable => c.causedBy(e)
-            }
+        case AwaitL_(recv) =>
+          val next = recv.runSafely(right(in.head))
           go(in.tail, out, next)
-        case AwaitBoth(recv, fb, c) =>
-          val next =
-            try recv(ReceiveY.ReceiveL(in.head))
-            catch {
-              case End => fb
-              case e: Throwable => c.causedBy(e)
-            }
+        case AwaitBoth_(recv) =>
+          val next = recv.runSafely(right(ReceiveY.ReceiveL(in.head)))
           go(in.tail, out, next)
-        case AwaitR(recv, fb, c) =>
+        case AwaitR_(recv) =>
           emitSeq(out.flatten,
-          await(R[I2]: Env[I,I2]#Y[I2])(recv andThen (feedL(in)), feedL(in)(fb), feedL(in)(c)))
+          await_(R[I2]: Env[I,I2]#Y[I2])(r => recv(r).map(y=>feedL(in)(y))))
       }
       else emitSeq(out.flatten, cur)
     go(i, Vector(), p)
@@ -308,25 +310,15 @@ object wye extends wye {
       if (in.nonEmpty) cur match {
         case h@Halt(_) => emitSeq(out.flatten, h)
         case Emit(h, t) => go(in, out :+ h, t)
-        case AwaitR(recv, fb, c) =>
-          val next =
-            try recv(in.head)
-            catch {
-              case End => fb
-              case e: Throwable => c.causedBy(e)
-            }
+        case AwaitR_(recv) =>
+          val next = recv.runSafely(right(in.head))
           go(in.tail, out, next)
-        case AwaitBoth(recv, fb, c) =>
-          val next =
-            try recv(ReceiveY.ReceiveR(in.head))
-            catch {
-              case End => fb
-              case e: Throwable => c.causedBy(e)
-            }
+        case AwaitBoth_(recv) =>
+          val next = recv.runSafely(right(ReceiveY.ReceiveR(in.head)))
           go(in.tail, out, next)
-        case AwaitL(recv, fb, c) =>
+        case AwaitL_(recv) =>
           emitSeq(out.flatten,
-          await(L[I]: Env[I,I2]#Y[I])(recv andThen (feedR(in)), feedR(in)(fb), feedR(in)(c)))
+          await_(L[I]: Env[I,I2]#Y[I])(r => recv(r).map(y=>feedR(in)(y))))
       }
       else emitSeq(out.flatten, cur)
     go(i, Vector(), p)
@@ -436,6 +428,14 @@ object wye extends wye {
     case object Both extends Request
   }
 
+  object AwaitL_ {
+    def unapply[I,I2,O](self: Wye[I,I2,O]):
+    Option[Throwable \/ I => Trampoline[Wye[I,I2,O]]] = self match {
+      case Await_(req,recv) if req.tag == 0 => Some(recv.asInstanceOf[Throwable \/ I => Trampoline[Wye[I,I2,O]]])
+      case _ => None
+    }
+  }
+
   object AwaitL {
     def unapply[I,I2,O](self: Wye[I,I2,O]):
         Option[(I => Wye[I,I2,O], Wye[I,I2,O], Wye[I,I2,O])] = self match {
@@ -447,6 +447,16 @@ object wye extends wye {
                       cleanup: Wye[I,I2,O] = halt): Wye[I,I2,O] =
       await(L[I]: Env[I,I2]#Y[I])(recv, fallback, cleanup)
   }
+
+  object AwaitR_ {
+    def unapply[I,I2,O](self: Wye[I,I2,O]):
+    Option[Throwable \/ I2 => Trampoline[Wye[I,I2,O]]] = self match {
+      case Await_(req,recv) if req.tag == 1 => Some(recv.asInstanceOf[Throwable \/ I2 => Trampoline[Wye[I,I2,O]]])
+      case _ => None
+    }
+  }
+
+
   object AwaitR {
     def unapply[I,I2,O](self: Wye[I,I2,O]):
         Option[(I2 => Wye[I,I2,O], Wye[I,I2,O], Wye[I,I2,O])] = self match {
@@ -458,6 +468,15 @@ object wye extends wye {
                       cleanup: Wye[I,I2,O] = halt): Wye[I,I2,O] =
       await(R[I2]: Env[I,I2]#Y[I2])(recv, fallback, cleanup)
   }
+
+  object AwaitBoth_ {
+    def unapply[I,I2,O](self: Wye[I,I2,O]):
+    Option[Throwable \/ ReceiveY[I,I2] => Trampoline[Wye[I,I2,O]]] = self match {
+      case Await_(req,recv) if req.tag == 2 => Some(recv.asInstanceOf[Throwable \/ ReceiveY[I,I2] => Trampoline[Wye[I,I2,O]]])
+      case _ => None
+    }
+  }
+
   object AwaitBoth {
     def unapply[I,I2,O](self: Wye[I,I2,O]):
         Option[(ReceiveY[I,I2] => Wye[I,I2,O], Wye[I,I2,O], Wye[I,I2,O])] = self match {

@@ -109,10 +109,12 @@ object ProcessSpec extends Properties("Process") {
       ("find" |: {
         (p.find(_ % 2 == 0).toList == p.toList.find(_ % 2 == 0).toList)
       })
-    )// &&
-//      "tee" |: all(
-//
-//    )
+    )  &&
+      ("tee" |: all(
+        ("zip" |: {
+          (p.toList.zip(p2.toList) === p.zip(p2).toList)
+        })
+     ))
 
 //todo: below, not process1 shall be in different spec
 //    ("zip" |: {
