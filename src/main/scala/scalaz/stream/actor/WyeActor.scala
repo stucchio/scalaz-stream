@@ -90,7 +90,8 @@ object WyeActor {
     }
 
     private def run(s: Process[Task, A], actor: Actor[Msg]): Unit = {
-      step = -\/(s.cleanup)
+      //todo: rather need to memoize recv here
+      //step = -\/(s.cleanup)
       s.runStep.runAsyncInterruptibly ({ cb => actor ! Ready(this, cb) },cleanup)
     }
   }

@@ -244,21 +244,22 @@ object ProcessSpec extends Properties("Process") {
     r.toString |: (r == l.zipAll(l2, -1, 1).toList)
   })
 
-//
-//  property("cleanup") = secure {
-//    val a = Process(false).toSource |> await1[Boolean]
-//    val b = a.orElse(Process.emit(false), Process.emit(true))
-//    b.cleanup.runLastOr(false).run
-//  }
-//
-//  property("onFailure") = secure {
-//    @volatile var i: Int = 0
-//    val p = eval(Task.delay(sys.error("FAIL"))) onFailure (Process.emit(1)) map (j => i = j)
-//    try { p.run.run; false }
-//    catch { case e: Throwable =>
-//      e.getMessage == "FAIL" && i == 1
-//    }
-//  }
+
+  property("cleanup") = secure {
+    val a = Process(false).toSource |> await1[Boolean]
+    val b = a.orElse(Process.emit(false), Process.emit(true))
+    b.cleanup(new Throwable("expected")).runLastOr(false).run
+  }
+
+
+  property("onFailure") = secure {
+    @volatile var i: Int = 0
+    val p = eval(Task.delay(sys.error("FAIL"))) onFailure ( Process.emit(1) map (j => i = j))
+    try { p.run.run; s"No exception: i = $i" |: i == 1 }
+    catch { case e: Throwable =>
+      s"failure: ${e.getMessage}, $i" |: false
+    }
+  }
 
 //  property("interrupt") = secure {
 //    val p1 = Process(1,2,3,4,6).toSource

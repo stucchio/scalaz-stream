@@ -347,11 +347,12 @@ sealed abstract class Process[+F[_],+O] {
    * Switch to the `fallback` case of the _next_ `Await` issued by this `Process`.
    */
   final def fallback: Process[F,O] = {
-    this match {
-      case AwaitF_(req,recv) =>  Await_[F,Any,O](req, _ => recv(-\/(End)).map(_.fallback))
-      case Emit(h, t) => emitSeq(h, t.fallback)
-      case h@Halt(_) => h
-    }
+    cleanup(End)
+//    this match {
+//      case AwaitF_(req,recv) =>  Await_[F,Any,O](req, _ => recv(-\/(End)).map(_.fallback))
+//      case Emit(h, t) => emitSeq(h, t.fallback)
+//      case h@Halt(_) => h
+//    }
 
 //    this match {
 //      case Await(req,recv,fb,c) => fb
@@ -430,7 +431,8 @@ sealed abstract class Process[+F[_],+O] {
    */
   final def onCleanup[F2[x]>:F[x],B>:O](f: Throwable => Process[F2,B]): Process[F2,B] = {
     this match {
-      case AwaitF_(req,recv) => awaitT(req)(recv andThen(_.map(p=>p.onCleanup(f).asInstanceOf[Process[F,B]])))
+      case Await_(req,recv) =>
+        await_(req)(recv andThen(_.map(p=>p.onCleanup(f).asInstanceOf[Process[F,B]])))
       case Emit(h,t) => Emit(h, t.onCleanup(f))
       case h@Halt(e) =>
         try f(e)
@@ -443,10 +445,13 @@ sealed abstract class Process[+F[_],+O] {
 
   /**
    * Run `p2` after this `Process` if this `Process` completes with an an error.
+   *
+   * Please note `p2` won't get consulted if this terminated because all input has been exhausted (`End`)
+   *
    */
   final def onError[F2[x]>:F[x],O2>:O](p2: Throwable => Process[F2,O2]): Process[F2,O2] = {
     onCleanup {
-      case End => this
+      case End => halt
       case e => p2(e)
     }
   }
@@ -454,6 +459,9 @@ sealed abstract class Process[+F[_],+O] {
 
   /**
    * Run `p2` after this `Process` if this `Process` completes with an an error.
+   *
+   * If you  want to create `p2` depending on reason for termination, use rather `onError`
+   *
    */
   final def onFailure[F2[x]>:F[x],O2>:O](p2: Process[F2,O2]): Process[F2,O2] = {
     onError { _ => p2}
@@ -505,13 +513,10 @@ sealed abstract class Process[+F[_],+O] {
 
   /**
    * Switch to the `cleanup` case of the next `Await` issued by this `Process`.
+   * @param rsn Reason for cleanup
    */
-  final def cleanup: Process[F,O] = {
-    this match {
-      case AwaitF_(req,recv) => awaitT(req)(r => recv(\/-(Kill)))
-      case Emit(h, t) => emitSeq(h, t.cleanup)
-      case h@Halt(_) => h
-    }
+  final def cleanup(rsn:Throwable): Process[F,O] = {
+    cleanupBy(rsn)
 
 
 //    this match {
@@ -846,13 +851,21 @@ sealed abstract class Process[+F[_],+O] {
   final def runFoldMap[F2[x]>:F[x], B](f: O => B)(implicit F: Monad[F2], C: Catchable[F2], B: Monoid[B]): F2[B] = {
     def go(cur: Process[F2,O], acc: B): F2[B] = {
       cur match {
-        case Emit(h,t:Process[F2,O]@unchecked) => go(t,h.foldLeft(acc)((x, y) => B.append(x, f(y))))
-        case Halt(e) => e match {
+        case Emit(h,t:Process[F2,O]@unchecked) =>
+          debug("RUNFM_EMIT",h,t)
+          go(t,h.foldLeft(acc)((x, y) => B.append(x, f(y))))
+        case Halt(e) =>
+          debug("RUNFM_HALT",e)
+
+          e match {
           case End => F.point(acc)
           case _ => C.fail(e)
         }
         case AwaitF_(req,recv) =>
-          F.bind (C.attempt(req))({r => go(recv(r).run,acc)})
+          debug("RUNFMAW",req,recv)
+          F.bind (C.attempt(req))({r =>
+            debug("RUNFMAW_RCV",r)
+            go(recv(r).run,acc)})
       }
     }
     go(this, B.zero)
