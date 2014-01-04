@@ -245,7 +245,7 @@ sealed abstract class Process[+F[_],+O] {
         case End => go(this)
         case _ => h
       }
-      case AwaitF_(req,recv) => awaitT(req)( recv andThen(_.map(p=>go(p))))
+      case AwaitF_(req,recv) => await_(req)(r => recv(r).map(p=>go(p)))
       case Emit(h, t) => emitSeq(h, go(t))
     }
     go(this)
@@ -682,30 +682,35 @@ sealed abstract class Process[+F[_],+O] {
    * we gracefully kill off the other side, then halt.
    */
   final def tee[F2[x]>:F[x],O2,O3](p2: Process[F2,O2])(t: Tee[O,O2,O3]): Process[F2,O3] = {
-    //typecase below are ok, hence feedL/feedR cannot turn tee to wye ...
-    //other typecasting is just bacuase scala cannot infere and prove some types correctly...
+    // typecasting is just bacuase scala cannot infere and prove some types correctly...
+    debug("TEE",t,"L:",this,"R:",p2)
     t match {
       case h@Halt(rsn) => this.killBy(rsn) onComplete p2.killBy(rsn) onComplete h
       case Emit(h, t2) => Emit(h, this.tee(p2)(t2))
       case AwaitL_(recvt) =>  this match {
         case Emit(h,t2) =>
-          val (out,next) = wye.feedL[O,O2,O3](h)(t).unemit
-          Emit(out,t2.tee(p2)(next.asInstanceOf[Tee[O,O2,O3]]))
-        case Await_(req,recv) => await_[F2,Any,O3](req)(r => recv(r).map(p=>p.tee(p2)(t)))
+          val (out,next) = scalaz.stream.tee.feedL[O,O2,O3](h)(t).unemit
+          Emit(out,t2.tee(p2)(next))
+        case Await_(req,recv) =>
+          await_[F2,Any,O3](req)(r => recv(r).map(p=>p.tee(p2)(t)))
+        case h@Halt(rsn) if p2.isHalt =>
+          val(out,_) = t.cleanupBy(rsn).unemit
+          emitSeq(out,h)
         case h@Halt(rsn) =>
-          val(out,next) = t.cleanupBy(rsn).unemit
-          Emit(out,p2.killBy(rsn) onComplete h)
+          h.tee(p2)(recvt.runSafely(left(rsn)))
       }
       case AwaitR_(recvt) =>
         p2 match {
         case Emit(h,t2) =>
-          val (out,next) = wye.feedR[O,O2,O3](h.asInstanceOf[Seq[O2]])(t).unemit
-          Emit(out,this.tee[F2,O2,O3](t2.asInstanceOf[Process[F2,O2]])(next.asInstanceOf[Tee[O,O2,O3]]))
+          val (out,next) = scalaz.stream.tee.feedR[O,O2,O3](h.asInstanceOf[Seq[O2]])(t).unemit
+          Emit(out,this.tee[F2,O2,O3](t2.asInstanceOf[Process[F2,O2]])(next))
         case Await_(req,recv) =>
           await_[F2,Any,O3](req.asInstanceOf[F2[Any]])(r => recv(r).map(p=>this.tee[F2,O2,O3](p.asInstanceOf[Process[F2,O2]])(t)))
+        case h@Halt(rsn) if this.isHalt =>
+          val(out,_) = t.cleanupBy(rsn).unemit
+          emitSeq(out,h)
         case h@Halt(rsn) =>
-          val(out,next) = t.cleanupBy(rsn).unemit
-          Emit(out,this.killBy(rsn) onComplete h)
+          this.tee(p2)(recvt.runSafely(left(rsn)))
       }
 
     }
@@ -1320,7 +1325,7 @@ object Process {
       fallback: => Process[F,A] = halt,
       cleanup: => Process[F,A] = halt): Process[F,A] =
   Await_(req,{
-    case \/-(r) => Trampoline.done(recv(r))
+    case \/-(r) => Trampoline.delay(recv(r))
     case -\/(End) => Trampoline.delay(fallback)
     case -\/(err) => Trampoline.delay(cleanup)
   }:(Throwable \/ R) => Trampoline[Process[F,A]])
@@ -2214,23 +2219,40 @@ object Process {
      * or `gather`.
      */
     def eval: Process[F,O] = {
-     /* def go(cur: Process[F,F[O]], recv: Throwable  => Trampoline[Process[F,O]]) : Process[F,O] = {
+      def go(cur: Process[F,F[O]], recv: (Throwable \/ F[O]) => Trampoline[Process[F,O]]) : Process[F,O] = {
         cur match {
-          case Halt(e) => recv(e).run
-          case Emit(h,t) =>
-            if (h.isEmpty) go(t, recv)
-            else awaitT(h.head)({
-              case \/-(o) => Trampoline.delay(Emit(List(o), go(Emit(h.tail,t),recv)))
-              case -\/(e) => recv(e)
-            })
-          case AwaitF_(req,recv1) =>
-            awaitT[F,Any,F[O]](req)({
-              case \/-(r) => go(r,e => recv1(left(e)).map(_.eval))
-              case -\/(e) => recv1(left(e)).map(_.eval)
-            })
+          case Halt(rsn) => recv.runCleanup(rsn)
+          case Emit(Seq(),t) => go(t,recv)
+          case Emit(h,t) => await_[F,O,O](h.head)({
+            case \/-(o) => Trampoline.delay(Emit(List(o), go(Emit(h.tail,t), recv)))
+            case -\/(e) => recv(left(e))
+          })
+          case Await_(req,recv0) =>
+            await_[F,F[O],O](req.asInstanceOf[F[F[O]]])(r => recv0(r).map(_.eval))
         }
       }
-      go(self,_=>Trampoline.done(halt))*/
+
+      go(self, _ => Trampoline.done(halt))
+
+
+
+      /* def go(cur: Process[F,F[O]], recv: Throwable  => Trampoline[Process[F,O]]) : Process[F,O] = {
+         cur match {
+           case Halt(e) => recv(e).run
+           case Emit(h,t) =>
+             if (h.isEmpty) go(t, recv)
+             else awaitT(h.head)({
+               case \/-(o) => Trampoline.delay(Emit(List(o), go(Emit(h.tail,t),recv)))
+               case -\/(e) => recv(e)
+             })
+           case AwaitF_(req,recv1) =>
+             awaitT[F,Any,F[O]](req)({
+               case \/-(r) => go(r,e => recv1(left(e)).map(_.eval))
+               case -\/(e) => recv1(left(e)).map(_.eval)
+             })
+         }
+       }
+       go(self,_=>Trampoline.done(halt))*/
 
 
 //      def go(cur: Process[F,F[O]], fallback: Process[F,O], cleanup: Process[F,O]): Process[F,O] =
@@ -2246,7 +2268,6 @@ object Process {
 //            await(req)(recv andThen (go(_, fb.eval, c.eval)), fb.eval, c.eval)
 //        }
 //      go(self, halt, halt)
-      ???
     }
 
     /**

@@ -1,7 +1,8 @@
 package scalaz.stream
 
-import Process._
+import scalaz.stream.Process._
 import scalaz.\/
+import scalaz.\/._
 import scalaz.Free.Trampoline
 
 /**
@@ -45,8 +46,8 @@ trait tee {
   def zipWith[I,I2,O](f: (I,I2) => O): Tee[I,I2,O] = { for {
     i <- awaitL[I]
     i2 <- awaitR[I2]
-    r <- emit(f(i,i2))
-  } yield r } repeat
+    r <- emit(f(i,i2)) fby zipWith(f)
+  } yield r }
 
 
   /** A version of `zipWith` that pads the shorter stream with values. */
@@ -55,7 +56,7 @@ trait tee {
     val fbR: Tee[I,I2,O] = passR[I2] map (f(padI, _    ))
     val fbL: Tee[I,I2,O] = passL[I]  map (f(_   , padI2))
     receiveLOr(fbR)(i =>
-    receiveROr(tee.feed1L(i)(fbL))(i2 => emit(f(i,i2)))) repeat
+    receiveROr(tee.feed1L(i)(fbL))(i2 => emit(f(i,i2)) fby zipWithAll(padI,padI2)(f)))
   }
 }
 
@@ -68,17 +69,12 @@ object tee extends tee {
       if (in.nonEmpty) cur match {
         case h@Halt(_) => emitSeq(out.flatten, h)
         case Emit(h, t) => go(in, out :+ h, t)
-        case AwaitL(recv, fb, c) =>
-          val next =
-            try recv(in.head)
-            catch {
-              case End => fb
-              case e: Throwable => Halt(e)
-            }
+        case AwaitL_(recv) =>
+          val next = recv.runSafely(right(in.head))
           go(in.tail, out, next)
-        case AwaitR(recv, fb, c) =>
+        case AwaitR_(recv) =>
           emitSeq(out.flatten,
-          await(R[I2]: Env[I,I2]#T[I2])(recv andThen (feedL(in)), feedL(in)(fb), feedL(in)(c)))
+          await_(R[I2]: Env[I,I2]#T[I2])(r => recv(r).map(t=>feedL(in)(t))))
       }
       else emitSeq(out.flatten, cur)
     go(i, Vector(), p)
@@ -91,17 +87,12 @@ object tee extends tee {
       if (in.nonEmpty) cur match {
         case h@Halt(_) => emitSeq(out.flatten, h)
         case Emit(h, t) => go(in, out :+ h, t)
-        case AwaitR(recv, fb, c) =>
-          val next =
-            try recv(in.head)
-            catch {
-              case End => fb
-              case e: Throwable => Halt(e)
-            }
+        case AwaitR_(recv) =>
+          val next = recv.runSafely(right(in.head))
           go(in.tail, out, next)
-        case AwaitL(recv, fb, c) =>
+        case AwaitL_(recv) =>
           emitSeq(out.flatten,
-          await(L[I]: Env[I,I2]#T[I])(recv andThen (feedR(in)), feedR(in)(fb), feedR(in)(c)))
+          await_(L[I]: Env[I,I2]#T[I])(r => recv(r).map(t=>feedR(in)(t))))
       }
       else emitSeq(out.flatten, cur)
     go(i, Vector(), p)

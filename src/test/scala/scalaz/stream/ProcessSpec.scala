@@ -10,7 +10,7 @@ import scalaz.std.string._
 import org.scalacheck._
 import Prop._
 import Arbitrary.arbitrary
-import scalaz.concurrent.Strategy
+import scalaz.concurrent.{Task, Strategy}
 import scala.concurrent
 import scalaz.\/-
 import scalaz.\/._
@@ -111,15 +111,17 @@ object ProcessSpec extends Properties("Process") {
       })
     )  &&
       ("tee" |: all(
-        ("zip" |: {
+       ("zip" |: {
           (p.toList.zip(p2.toList) === p.zip(p2).toList)
+        }) &&
+        ("passL/R" |: {
+          p.toSource.tee(halt)(tee.passL[Int]).runLog.run == p.toList &&
+            halt.tee(p.toSource)(tee.passR[Int]).runLog.run == p.toList
         })
      ))
 
 //todo: below, not process1 shall be in different spec
-//    ("zip" |: {
-//      (p.toList.zip(p2.toList) === p.zip(p2).toList)
-//    }) &&
+
 //    ("yip" |: {
 //      val l = p.toList.zip(p2.toList)
 //      val r = p.toSource.yip(p2.toSource).runLog.timed(3000).run.toList
@@ -235,19 +237,13 @@ object ProcessSpec extends Properties("Process") {
   implicit def arbVec[A:Arbitrary]: Arbitrary[IndexedSeq[A]] =
     Arbitrary(Gen.listOf(arbitrary[A]).map(_.toIndexedSeq))
 
-//  property("zipAll") = forAll((l: IndexedSeq[Int], l2: IndexedSeq[Int]) => {
-//    val a = Process.range(0,l.length).map(l(_))
-//    val b = Process.range(0,l2.length).map(l2(_))
-//    val r = a.tee(b)(tee.zipAll(-1, 1)).runLog.run.toList
-//    r.toString |: (r == l.zipAll(l2, -1, 1).toList)
-//  })
+  property("zipAll") = forAll((l: IndexedSeq[Int], l2: IndexedSeq[Int]) => {
+    val a = Process.range(0,l.length).map(l(_))
+    val b = Process.range(0,l2.length).map(l2(_))
+    val r = a.tee(b)(tee.zipAll(-1, 1)).runLog.run.toList
+    r.toString |: (r == l.zipAll(l2, -1, 1).toList)
+  })
 
-//  property("passL/R") = secure {
-//    val a = Process.range(0,10)
-//    val b: Process[Task,Int] = halt
-//    a.tee(b)(tee.passL[Int]).runLog.run == List.range(0,10) &&
-//    b.tee(a)(tee.passR[Int]).runLog.run == List.range(0,10)
-//  }
 //
 //  property("cleanup") = secure {
 //    val a = Process(false).toSource |> await1[Boolean]
