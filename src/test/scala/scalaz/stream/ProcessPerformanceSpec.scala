@@ -38,16 +38,12 @@ object ProcessPerformanceSpec extends Properties("Process.performance") {
         , timed(Process.range(0, 100000).pipe(goodId).run.run)
       ).map(_._2)
 
-
     s"await1: $bad" |: ((bad(0) * 10 > bad(1)) && (bad(1) * 10 > bad(2))) &&
       (s"receive1: $good" |: ((good(0) * 10 > good(1)) && (good(1) * 10 > good(2))))
-
-
   }
 
   //checks flatMap does not have O^2 performance
   property("flatMap") = secure {
-
     val fm =
       Seq(
         timed(Process.range(0, 1000).flatMap(emit).run.run)
@@ -55,14 +51,11 @@ object ProcessPerformanceSpec extends Properties("Process.performance") {
         , timed(Process.range(0, 100000).flatMap(emit).run.run)
       ).map(_._2)
 
-
     ((fm(0) * 10 > fm(1)) && (fm(1) * 10 > fm(2)))
-
   }
 
   //checks performance of append
   property("append") = secure {
-
     val apnd =
       Seq(
         timed((0 until 1000).foldLeft(halt: Process[Task, Int])((acc, i) => acc ++ emit(i)))
@@ -70,9 +63,7 @@ object ProcessPerformanceSpec extends Properties("Process.performance") {
         , timed((0 until 100000).foldLeft(halt: Process[Task, Int])((acc, i) => acc ++ emit(i)))
       ).map(_._2)
 
-
     ((apnd(0) * 10 > apnd(1)) && (apnd(1) * 10 > apnd(2)))
-
   }
 
 
