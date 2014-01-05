@@ -242,19 +242,19 @@ sealed abstract class Process[+F[_],+O] {
   /**
    * Run this process until it halts, then run it again and again, as
    * long as no errors occur.
+   *
+   * Please note this halts only after unhandled error is thrown.
+   * If your process does not terminate with unhandled error, this will never terminate.
+   *
    */
   //todo: do we really need F2>:F here ? Sometimes it makes type checker of scala crazy
   final def repeat[F2[x]>:F[x],O2>:O]: Process[F2,O2] = {
-    def go(cur: Process[F,O]): Process[F,O] = cur match {
-      case h@Halt(e) => e match {
-        case End => go(this)
-        case _ => h
-      }
-      case AwaitF_(req,recv) => await_(req)(r => recv(r).map(p=>go(p)))
-      case Emit(h, t) => emitSeq(h, go(t))
+    this match {
+      case h@Halt(End) => this
+      case h@Halt(_) => h
+      case Emit(h,t) => Emit(h,t.repeat)
+      case AwaitF_(req,recv) => await_(req)(r => recv(r).map(_.repeat))
     }
-    go(this)
-
 
 //    def go(cur: Process[F,O]): Process[F,O] = cur match {
 //      case h@Halt(e) => e match {

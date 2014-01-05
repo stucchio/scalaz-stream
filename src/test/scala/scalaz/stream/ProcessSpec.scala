@@ -215,13 +215,13 @@ object ProcessSpec extends Properties("Process") {
     nOpened.get == 0
 }
 
-  // ensure that zipping terminates when the smaller stream runs out
-//  property("zip one side infinite") = secure {
-//    val ones = Process.eval(Task.now(1)).repeat
-//    val p = Process(1,2,3)
-//    ones.zip(p).runLog.run == IndexedSeq(1 -> 1, 1 -> 2, 1 -> 3) &&
-//    p.zip(ones).runLog.run == IndexedSeq(1 -> 1, 2 -> 1, 3 -> 1)
-//  }
+  //ensure that zipping terminates when the smaller stream runs out
+  property("zip one side infinite") = secure {
+    val ones = repeatEval(Task.now(1))
+    val p = Process(1,2,3)
+    ones.zip(p).runLog.timed(3000).run == IndexedSeq(1 -> 1, 1 -> 2, 1 -> 3) &&
+    p.zip(ones).runLog.timed(3000).run == IndexedSeq(1 -> 1, 2 -> 1, 3 -> 1)
+  }
 
   property("merge") = secure {
     import scala.concurrent.duration._
