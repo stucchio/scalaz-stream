@@ -274,7 +274,8 @@ object wye extends wye {
   /** Feed a sequence of inputs to the left side of a `Tee`. */
   def feedL[I,I2,O](i: Seq[I])(p: Wye[I,I2,O]): Wye[I,I2,O] = {
     @annotation.tailrec
-    def go(in: Seq[I], out: Vector[Seq[O]], cur: Wye[I,I2,O]): Wye[I,I2,O] =
+    def go(in: Seq[I], out: Vector[Seq[O]], cur: Wye[I,I2,O]): Wye[I,I2,O] = {
+      debug("WFEEDL", in, out, cur)
       if (in.nonEmpty) cur match {
         case h@Halt(_) => emitSeq(out.flatten, h)
         case Emit(h, t) => go(in, out :+ h, t)
@@ -289,6 +290,7 @@ object wye extends wye {
           await_(R[I2]: Env[I,I2]#Y[I2])(r => recv(r).map(y=>feedL(in)(y))))
       }
       else emitSeq(out.flatten, cur)
+    }
     go(i, Vector(), p)
   }
 
@@ -296,7 +298,8 @@ object wye extends wye {
   def feedR[I,I2,O](i: Seq[I2])(p: Wye[I,I2,O]): Wye[I,I2,O] = {
 
     @annotation.tailrec
-    def go(in: Seq[I2], out: Vector[Seq[O]], cur: Wye[I,I2,O]): Wye[I,I2,O] =
+    def go(in: Seq[I2], out: Vector[Seq[O]], cur: Wye[I,I2,O]): Wye[I,I2,O] = {
+      debug("WFEEDR", in, out, cur)
       if (in.nonEmpty) cur match {
         case h@Halt(_) => emitSeq(out.flatten, h)
         case Emit(h, t) => go(in, out :+ h, t)
@@ -311,8 +314,10 @@ object wye extends wye {
           await_(L[I]: Env[I,I2]#Y[I])(r => recv(r).map(y=>feedR(in)(y))))
       }
       else emitSeq(out.flatten, cur)
+    }
     go(i, Vector(), p)
   }
+
 
   /** Signal to wye that left side has terminated **/
   def haltL[I,I2,O](e:Throwable)(p:Wye[I,I2,O]):Wye[I,I2,O] = {

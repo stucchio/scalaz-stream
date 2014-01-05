@@ -307,11 +307,7 @@ sealed abstract class Process[+F[_],+O] {
 
   /** Halt this process. Allow for any fallback or cleanup actions to be run based on `e` passed in */
   final def killBy(e: Throwable): Process[F,Nothing] = {
-    this match {
-      case Await_(req,recv) => recv(left(e)).run.drain
-      case Emit(h,t) => t.killBy(e)
-      case Halt(_) => Halt(e)
-    }
+    cleanup(e).drain
   }
 
 //    this.kill.causedBy(e)
@@ -689,7 +685,8 @@ sealed abstract class Process[+F[_],+O] {
     t match {
       case h@Halt(rsn) => this.killBy(rsn) onComplete p2.killBy(rsn) onComplete h
       case Emit(h, t2) => Emit(h, this.tee(p2)(t2))
-      case AwaitL(recvt) =>  this match {
+      case AwaitL(recvt) =>
+        this match {
         case Emit(h,t2) =>
           val (out,next) = scalaz.stream.tee.feedL[O,O2,O3](h)(t).unemit
           Emit(out,t2.tee(p2)(next))
@@ -1681,11 +1678,11 @@ object Process {
       cleanup: => Tee[I,I2,O] = halt): Tee[I,I2,O] =
     await[Env[I,I2]#T,I2,O](R)(recv, fallback, cleanup)
 
-  def receiveLOr[I,I2,O](fallback: Tee[I,I2,O])(
+  def receiveLOr[I,I2,O](fallback: => Tee[I,I2,O])(
                        recvL: I => Tee[I,I2,O]): Tee[I,I2,O] =
     receiveL(recvL, fallback)
 
-  def receiveROr[I,I2,O](fallback: Tee[I,I2,O])(
+  def receiveROr[I,I2,O](fallback: => Tee[I,I2,O])(
                        recvR: I2 => Tee[I,I2,O]): Tee[I,I2,O] =
     receiveR(recvR, fallback)
 
@@ -1954,7 +1951,13 @@ object Process {
     def runSafely(r:Throwable \/ R) : Process[F,A] = {
       try self(r).run
       catch {
-        case t : Throwable => try self(left(t)).run catch { case t0: Throwable => Halt(CausedBy(t0,t))}
+        case t : Throwable =>
+          debug("RSFLY", t.getMessage, t.getClass.getName)
+          try self(left(t)).run catch {
+            case t0: Throwable =>
+              debug("RSFLY_FBC", t0.getMessage, t0.getClass.getName)
+              Halt(CausedBy(t0,t))
+          }
       }
     }
 
