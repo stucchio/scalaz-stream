@@ -9,12 +9,15 @@ import scala.Some
 import scala.collection.immutable.{IndexedSeq,SortedMap,Queue,Vector}
 import scala.concurrent.duration._
 import scalaz.Free.Trampoline
-import scalaz.concurrent.{Strategy, Task}
+import scalaz.concurrent.{Actor, Strategy, Task}
 import scalaz.stream.actor.{WyeActor, message, actors}
 import scala.Some
 import scalaz.\/-
 import scalaz.-\/
 import scalaz.stream.tee.{AwaitR, AwaitL}
+import java.util.concurrent.atomic.{AtomicReference, AtomicBoolean}
+import scalaz.stream.Step_.{Done, Interruption}
+import scala.annotation.tailrec
 
 
 /**
@@ -620,14 +623,6 @@ sealed abstract class Process[+F[_],+O] {
     ???
   }
 
-  final def stepT:Process[F, Step_[F,O]] = {
-    this match {
-      case h@Halt(e) => emit(Step_(-\/(e) , Trampoline.done(h) ,_ => Trampoline.done(halt)))
-      case Emit(Seq(),t) => t.stepT
-      case Emit(h,t) => emit(Step_(\/-(h), Trampoline.done(t), e => Trampoline.delay(t.killBy(e))))
-      case AwaitF_(req,recv) =>  awaitT(req)(r => recv(r).map(_.stepT))
-    }
-  }
 
   /**
    * Feed the output of this `Process` as input of `p2`. The implementation
@@ -1811,6 +1806,157 @@ object Process {
       go(self, input)
     }
   }
+
+  /**
+   * Various helpers for source processes specialized to `Task`
+   * @param self
+   * @tparam O
+   */
+  implicit class ProcessTaskSyntax[O](self: Process[Task,O]) {
+
+    /**
+     * Drives run of this process asynchronously producing next `Step`,
+     * with a possibility to invoke returned interruption, that will interrupt the
+     * evaluation of the step and completes callback with `Done(Interrupted)`.
+     *
+     * Please note that this runs any cleanup and fallback step may have attached to it, before invoking the callback
+     * when the process terminates, or when is interrupted.
+     *
+     * ------------------------------------
+     * RESOURCE CLEANUP AFTER INTERRUPTION
+     * ------------------------------------
+     *
+     * When interrupted, this function runs cleanup from the last evaluated `Await` to release resources.
+     * So if you are allocating resources with
+     *
+     *   `await(allocate)(r => use(r).onComplete(release(r)))`
+     *
+     * then you risk a leakage. Since when interrupt happens in `allocate` after allocation has been actually executed
+     * then `recv` is not called and `halt` is used for cleanup. The correct way of allocation is
+     *
+     *   `def allocAndUse(r: Res) = await(allocate(r))(_ => use).onComplete(reelease(r))`
+     *
+     *    `await(getHandleToUnallocatedResource)(r => allocAndUse(r))`
+     *
+     * Note that step is NEVER interrupted when it is not asnychrounous. So the
+     *
+     *   `await(Task.delay(R))(r=>use(r) onComplete release(r))`
+     *
+     * is completely safe, and there is no risk that Task.delay(R) will get interrupted.
+     *
+     * Please note  `release` must be idempotent since when
+     * `release(r)` in outer `await` is interrupted after releasing the resource it will be called again.
+     * This is because when we are running process that ends normally, this driver is not aware whether
+     * we are in cleanup stage or not.
+     *
+     * Another important rule about `relese` is that it should never be `blocking` both in synchronous and asynchronous
+     * sense. `release` will be never interrupted when forcefully entered intor cleanup,
+     * so if `release` will `block`, the wye, mergex etc.. using this driver will be in deadlock.
+     *
+     *
+     * @param cb
+     * @return
+     */
+    def runStepAsync(cb: Step_[Task, O] => Unit): Interruption = {
+      trait M
+      case class Next(cur: Process[Task, O]) extends M
+      case object Interrupt extends M
+
+      def runAwaitStep(p:Process[Task,O]): Interruption = {
+        // althought it can be var, this is used to interrupt the running task, so its AtomicBoolean
+        val done = new AtomicBoolean(false)
+
+        //memoizes last cleanup from await, used when interrupting.
+        //may be None, if there was no async task in await yet.
+        var cln: Option[Throwable \/ Any => Trampoline[Process[Task, O]]] = None
+
+        var actor :Actor[M] = null
+
+        actor = Actor[M]({
+          case Next(p) if !done.get =>
+            @tailrec
+            def go(cur: Process[Task, O]) : Unit = {
+              cur match {
+                case Emit(h, t) =>
+                  val (h0, t0) = t.unemit
+                  val hh = h ++ h0
+                  if (hh.isEmpty) go(t)
+                  else {
+                    done.set(true)
+                    cb(Step_.cont(hh,t0))
+                  }
+
+                case Halt(rsn) =>
+                  done.set(true)
+                  cb(Step_.Done(rsn))
+
+                case Await_(req, recv) =>
+                  //here we `running` the req Task to strip any non-async code.
+                  //If the task can be avaluated synchronously, we just evaluate it here and complete callback
+                  //else we just fork the task to be run off this actor and come back once done
+                  req.get.step match {
+                    //now
+                    case scalaz.concurrent.Future.Now(r@(\/-(_)))  =>
+                      go(recv.runSafely(r))
+
+                    //fallback
+                    case scalaz.concurrent.Future.Now(r@(-\/(End)))  =>
+                      go(recv.runFallback)
+
+                    //cleanup
+                    case scalaz.concurrent.Future.Now(r@(-\/(rsn)))  =>
+                      done.set(true) //disallow interruption
+                      recv.runCleanup(rsn).run.runAsync {
+                        case \/-(_) => cb(Step_.Done(rsn))
+                        case -\/(err) => cb(Step_.Done(CausedBy(err,rsn)))
+                      }
+
+                    //async
+                    case fasync =>
+                      cln = Some(recv)
+                      new Task(fasync).runAsyncInterruptibly(r => {
+                        actor ! Next(recv.runSafely(r))
+                      }, done)
+
+                  }
+              }
+            }
+            go(p)
+
+
+          case Interrupt if ! done.get =>
+            done.set(true)
+            val iex = new InterruptedException
+            cln match {
+              case Some(recv) =>
+                recv.runCleanup(iex).run.runAsync {
+                  case \/-(_) => cb(Step_.Done(iex))
+                  case -\/(err) => cb(Step_.Done(CausedBy(err,iex)))
+                }
+              case None =>
+                cb(Step_.Done(iex))
+
+            }
+            cln = None
+
+          case _ => //no-op when we are done...
+        })(Strategy.Sequential)
+
+        actor ! Next(p)
+        Interruption(() => actor ! Interrupt )
+      }
+
+      self.unemit match {
+        case (Seq(),next) => runAwaitStep(next)
+        case (out, next) =>
+          cb(Step_.cont(out,next))
+          Interruption.noop
+      }
+
+    }
+
+  }
+
 
   /** Helpers for running Trampolined receive to obtain various next steps from recv of Await **/
   implicit class ReceiveSyntax[F[_],R,A](val self: Throwable \/ R => Trampoline[Process[F,A]]) extends AnyVal {

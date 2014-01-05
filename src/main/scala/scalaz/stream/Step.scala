@@ -1,8 +1,8 @@
 package scalaz.stream
 
-import scalaz.{\/-, -\/, \/}
-import scalaz.stream.Process._
 import scalaz.Free.Trampoline
+import scalaz.stream.Process._
+import scalaz.{Trampoline, \/-, -\/, \/}
 
 /**
  * Represents an intermediate step of a `Process`, including any current
@@ -27,39 +27,44 @@ object Step {
   def fromProcess[F[_],A](p:Process[F,A]):Step[F,A] = Step(\/-(Nil),p,halt)
 }
 
-/** trampolined version of step **/
-case class Step_[+F[_],+A](
-  head: Throwable \/ Seq[A]
-  , tail: Trampoline[Process[F,A]]
-  , cleanup: Throwable => Trampoline[Process[F,A]]) {
 
-  def fold[R](success: Seq[A] => R, fallback: => R, error: Throwable => R): R = {
-    head.fold({
-      case  End => fallback
-      case  e => error(e)
-    }
-    , success)
-  }
+/**
+ * Represents an intermediate step of a `Process`.
+ *
+ * Step may be in `Cont` or `Done` state
+ *
+ */
+sealed trait Step_[+F[_], +A]
 
-}
 
 object Step_ {
 
-  object next {
+  case class Interruption(interrupt: () => Unit)
 
-    def unapply[F[_],A](s:Step_[F,A]) : Option[(Seq[A],Trampoline[Process[F,A]])] =  s.head match {
-      case \/-(a) => Some((a,s.tail))
-      case _ => None
-    }
-
+  object Interruption {
+    /** Interruption that does nothing **/
+    val noop: Interruption = Interruption(() => ())
   }
 
-  object failed {
-    def unapply[F[_],A](s:Step_[F,A]) : Option[(Throwable,Trampoline[Process[F,A]])] =  s.head match {
-      case -\/(e) => Some((e,s.cleanup(e)))
-      case _ => None
-    }
-  }
+  /** Step, that continues by tail, and eventually emitted Head **/
+  case class Cont[F[_], A](
+    head: Seq[A]
+    , tail: Process[F, A]
+    , recv: Throwable \/ A => Trampoline[Process[F, A]]
+    ) extends Step_[F, A]
 
+  /** Process has finished, contains reason that caused process to finish **/
+  case class Done(rsn: Throwable) extends Step_[Nothing, Nothing]
+
+  /** Builds the initial step of process that has not been run yet **/
+  def init[F[_], A](p: Process[F, A]): Step_[F, A] = Cont[F, A](Nil, p, _ => Trampoline.done(halt))
+
+  /** Builds intermediate step of the process **/
+  def cont[F[_], A](h: Seq[A], p: Process[F, A]): Step_[F, A] =
+    Step_.Cont[F, A](h, p, {
+      case \/-(_)   => Trampoline.done(halt)
+      case -\/(rsn) => Trampoline.delay(p.cleanup(rsn))
+    })
 
 }
+

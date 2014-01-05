@@ -7,11 +7,20 @@ import scala.annotation.tailrec
 import scalaz._
 import scalaz.concurrent.{Strategy, Actor, Task}
 import scalaz.stream.Process._
-import scalaz.stream.Step
+import scalaz.stream.{Step_, Step, Process, wye}
 import scalaz.stream.wye.{AwaitBoth, AwaitR, AwaitL}
-import scalaz.stream.{Process, wye}
+import scalaz.stream.Step_.{Cont, Interruption}
+import scalaz.Free._
+import scalaz.stream.Process.Emit
+import scalaz.stream.Process.suspend
+import scala.Some
+import scalaz.stream.Step_.Interruption
+import scalaz.\/-
+import scalaz.-\/
+import scalaz.stream.Process.Halt
 
 object WyeActor {
+
 
   /**
    * Evaluates one step of the process `p` and calls the callback `cb` with the evaluated step `s`.
@@ -117,7 +126,7 @@ object WyeActor {
 
   trait WyeSide[A, L, R, O] {
     /** returns next wye after processing the result of the step **/
-    def receive(step: Step[Task,A])(y2: Wye[L,R,O]): Wye[L,R,O]
+    def receive(step: Step_[Task,A])(y2: Wye[L,R,O]): Wye[L,R,O]
   }
 
   sealed trait WyeSideState[A]
@@ -125,18 +134,21 @@ object WyeActor {
   /**
    * Process of this side is not running and hasn't halted.
    * @param cont Continuation. To be run when wye awaits this side.
-   * @param cleanup Cleanup from the last evaluated `Await` of this process. To be run when wye halts.
+   * @param cleanup Cleanup from the last evaluated step of this process. To be run when wye halts.
    */
-  final case class Ready[A](cont: Process[Task,A], cleanup: Process[Task,A]) extends WyeSideState[A]
+  final case class Ready[A](
+    cont: Process[Task,A]
+    , cleanup: Throwable \/ A => Trampoline[Process[Task, A]]
+    ) extends WyeSideState[A]
 
   /**
    * Step is running. Actor will receive `StepCompleted` when finished.
    *
    * The reason for this state is that wye requested data from this side (awaited this side) or that
    * wye terminated this side.
-   * @param interrupt To be called when terminating running side.
+   * @param ri Interruption returned from `runStepAsync`
    */
-  final case class Running[A](interrupt: () => Unit) extends WyeSideState[A]
+  final case class Running[A](ri:Interruption) extends WyeSideState[A]
 
   /**
    * This side has halted and wye knows it.
@@ -148,7 +160,7 @@ object WyeActor {
   /**
    * Notification that side completed step.
    */
-  final case class StepCompleted[A,L,R,O](from: WyeSide[A,L,R,O], step: Step[Task,A]) extends Msg
+  final case class StepCompleted[A,L,R,O](from: WyeSide[A,L,R,O], step: Step_[Task,A]) extends Msg
 
   /**
    * Request for data from wye.
@@ -168,16 +180,14 @@ object WyeActor {
     def haltA(e: Throwable)(y2: Wye[L, R, O]): Wye[L, R, O]
 
     //feeds the wye by element or signals halt to wye, producing next state of process
-    def receive(step: Step[Task, A])(y2: Wye[L, R, O]): Wye[L, R, O] = {
-      val fedY = feedA(step.head.getOrElse(Nil))(y2)
+    def receive(step: Step_[Task, A])(y2: Wye[L, R, O]): Wye[L, R, O] = {
       step match {
-        // `runStepAsyncInterruptibly` guarantees that halted process is cleaned.
-        case Step(_, Halt(e), _) =>
-          state = Done(e)
-          haltA(e)(fedY)
-        case Step(_, tail, cleanup) =>
-          state = Ready(tail, cleanup)
-          fedY
+        case Step_.Done(rsn) =>
+          state = Done(rsn)
+          haltA(rsn)(y2)
+        case Step_.Cont(h,t,recvt) =>
+          state = Ready(t,recvt)
+          feedA(h)(y2)
       }
     }
 
@@ -198,17 +208,15 @@ object WyeActor {
      */
     def terminate(e: Throwable, actor: Actor[Msg]): Unit = state match {
       case Ready(_, cleanup) =>
-        runStep(cleanup.drain, actor)
+        runStep(cleanup.runCleanup(e), actor)
         // Replace interrupt by noop, so cleanup won't be interrupted.
-        state = Running(() => ())
-      case Running(interrupt) => interrupt()
+        state = Running(Interruption.noop)
+      case Running(ri) => ri.interrupt()
       case Done(_) => ()
     }
 
     private def runStep(p: Process[Task,A], actor: Actor[Msg]): Unit = {
-      val interrupt = runStepAsyncInterruptibly[A](p, step => actor ! StepCompleted(this, step))
-      //step = -\/(s.cleanup)
-      state = Running(interrupt)
+      state = Running(p.runStepAsync(step => actor ! StepCompleted(this,step)))
     }
   }
 
@@ -253,8 +261,8 @@ object WyeActor {
 
     val L: LeftWyeSide = LeftWyeSide()
     val R: RightWyeSide = RightWyeSide()
-    yy = L.receive(Step.fromProcess(pl))(yy)
-    yy = R.receive(Step.fromProcess(pr))(yy)
+    yy = L.receive(Step_.init(pl))(yy)
+    yy = R.receive(Step_.init(pr))(yy)
 
     def completeOut(cb: (Throwable \/ Seq[O]) => Unit, r: Throwable \/ Seq[O]): Unit = {
       out = None
