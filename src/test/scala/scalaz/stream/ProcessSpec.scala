@@ -129,15 +129,6 @@ object ProcessSpec extends Properties("Process") {
           (l === r)
         })
       ))
-
-//todo: below, not process1 shall be in different spec
-
-//    ("yip" |: {
-//      val l = p.toList.zip(p2.toList)
-//      val r = p.toSource.yip(p2.toSource).runLog.timed(3000).run.toList
-//      (l === r)
-//    }) &&
-
   }
 
   property("fill") = forAll(Gen.choose(0,30).map2(Gen.choose(0,50))((_,_))) {
