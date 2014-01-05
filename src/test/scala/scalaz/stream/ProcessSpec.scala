@@ -121,7 +121,14 @@ object ProcessSpec extends Properties("Process") {
           p.toSource.tee(halt)(tee.passL[Int]).runLog.run == p.toList &&
             halt.tee(p.toSource)(tee.passR[Int]).runLog.run == p.toList
         })
-     ))
+     )) &&
+      ("wye" |: all (
+        ("yip" |: {
+          val l = p.toList.zip(p2.toList)
+          val r = p.toSource.yip(p2.toSource).runLog.timed(3000).run.toList
+          (l === r)
+        })
+      ))
 
 //todo: below, not process1 shall be in different spec
 
@@ -156,66 +163,66 @@ object ProcessSpec extends Properties("Process") {
 // }
 
   // ensure that wye terminates
-//  property("wye one side infinite") = secure {
-//    import ReceiveY._
-//    def whileBoth[A,B]: Wye[A,B,Nothing] = {
-//      def go: Wye[A,B,Nothing] = receiveBoth[A,B,Nothing] {
-//        case HaltL(_) | HaltR(_) => halt
-//        case _ => go
-//      }
-//      go
-//    }
-//    val inf = Process.constant(0)
-//    val one = eval(Task.now(1))
-//    val empty = Process[Int]()
-//    inf.wye(empty)(whileBoth).run.timed(800).attempt.run == \/-(()) &&
-//    empty.wye(inf)(whileBoth).run.timed(800).attempt.run == \/-(()) &&
-//    inf.wye(one)(whileBoth).run.timed(800).attempt.run == \/-(()) &&
-//    one.wye(inf)(whileBoth).run.timed(800).attempt.run == \/-(())
-//  }
-//
-//  property("wye runs cleanup for both sides") = secure {
-//    import ReceiveY._
-//    import java.util.concurrent.atomic.AtomicBoolean
-//    def eitherWhileBoth[A,B]: Wye[A,B,A \/ B] = {
-//      def go: Wye[A,B,A \/ B] = receiveBoth[A,B,A \/ B] {
-//        case HaltL(_) | HaltR(_) => halt
-//        case ReceiveL(i) => emit(-\/(i)) fby go
-//        case ReceiveR(i) => emit(\/-(i)) fby go
-//      }
-//      go
-//    }
-//    val completed = new AtomicBoolean(false)
-//    val (_, qProc) = async.queue[Unit]
-//    val left = qProc.onComplete(eval(Task.delay { completed.set(true) }))
-//    val right = Process[Int](1)
-//    left.wye(right)(eitherWhileBoth).run.run
-//    completed.get
-//  }
-//
-//  property("wye runs cleanup from last evaluated await") = secure {
-//    import ReceiveY._
-//    import java.util.concurrent.atomic.AtomicInteger
-//    def whileBoth[A,B]: Wye[A,B,Nothing] = {
-//      def go: Wye[A,B,Nothing] = receiveBoth[A,B,Nothing] {
-//        case HaltL(_) | HaltR(_) => halt
-//        case _ => go
-//      }
-//      go
-//    }
-//    val openComplete = new concurrent.SyncVar[Unit]
-//    val nOpened = new AtomicInteger
-//    val open: Task[Unit] = Task.delay { nOpened.incrementAndGet(); openComplete.put(()) }
-//    val close: Task[Unit] = Task.delay { nOpened.decrementAndGet() }
-//    val (q, qProc) = async.queue[Unit]
-//    val (_, block) = async.queue[Unit]
-//    val resourceProc = await(open)(_ => block, halt, halt).onComplete(eval_(close))
-//    val complexProc = Process.suspend(resourceProc)
-//    Task { openComplete.get; q.close }.runAsync(_ => ())
-//    // Left side opens the resource and blocks, right side terminates. Resource must be closed.
-//    complexProc.wye(qProc)(whileBoth).run.run
-//    nOpened.get == 0
-// }
+  property("wye one side infinite") = secure {
+    import ReceiveY._
+    def whileBoth[A,B]: Wye[A,B,Nothing] = {
+      def go: Wye[A,B,Nothing] = receiveBoth[A,B,Nothing] {
+        case HaltL(_) | HaltR(_) => halt
+        case _ => go
+      }
+      go
+    }
+    val inf = Process.constant(0)
+    val one = eval(Task.now(1))
+    val empty = Process[Int]()
+    inf.wye(empty)(whileBoth).run.timed(800).attempt.run == \/-(()) &&
+    empty.wye(inf)(whileBoth).run.timed(800).attempt.run == \/-(()) &&
+    inf.wye(one)(whileBoth).run.timed(800).attempt.run == \/-(()) &&
+    one.wye(inf)(whileBoth).run.timed(800).attempt.run == \/-(())
+  }
+
+  property("wye runs cleanup for both sides") = secure {
+    import ReceiveY._
+    import java.util.concurrent.atomic.AtomicBoolean
+    def eitherWhileBoth[A,B]: Wye[A,B,A \/ B] = {
+      def go: Wye[A,B,A \/ B] = receiveBoth[A,B,A \/ B] {
+        case HaltL(_) | HaltR(_) => halt
+        case ReceiveL(i) => emit(-\/(i)) fby go
+        case ReceiveR(i) => emit(\/-(i)) fby go
+      }
+      go
+    }
+    val completed = new AtomicBoolean(false)
+    val (_, qProc) = async.queue[Unit]
+    val left = qProc.onComplete(eval(Task.delay { completed.set(true) }))
+    val right = Process[Int](1)
+    left.wye(right)(eitherWhileBoth).run.run
+    completed.get
+  }
+
+  property("wye runs cleanup from last evaluated await") = secure {
+    import ReceiveY._
+    import java.util.concurrent.atomic.AtomicInteger
+    def whileBoth[A,B]: Wye[A,B,Nothing] = {
+      def go: Wye[A,B,Nothing] = receiveBoth[A,B,Nothing] {
+        case HaltL(_) | HaltR(_) => halt
+        case _ => go
+      }
+      go
+    }
+    val openComplete = new concurrent.SyncVar[Unit]
+    val nOpened = new AtomicInteger
+    val open: Task[Unit] = Task.delay { nOpened.incrementAndGet(); openComplete.put(()) }
+    val close: Task[Unit] = Task.delay { nOpened.decrementAndGet() }
+    val (q, qProc) = async.queue[Unit]
+    val (_, block) = async.queue[Unit]
+    val resourceProc = await(open)(_ => block, halt, halt).onComplete(eval_(close))
+    val complexProc = Process.suspend(resourceProc)
+    Task { openComplete.get; q.close }.runAsync(_ => ())
+    // Left side opens the resource and blocks, right side terminates. Resource must be closed.
+    complexProc.wye(qProc)(whileBoth).run.run
+    nOpened.get == 0
+}
 
   // ensure that zipping terminates when the smaller stream runs out
 //  property("zip one side infinite") = secure {
@@ -235,13 +242,13 @@ object ProcessSpec extends Properties("Process") {
     tasks.forall(_.isRight)
   }
 
-//  property("forwardFill") = secure {
-//    import scala.concurrent.duration._
-//    val t2 = Process.awakeEvery(2 seconds).forwardFill.zip {
-//             Process.awakeEvery(100 milliseconds).take(100)
-//           }.run.timed(15000).run
-//    true
-//  }
+  property("forwardFill") = secure {
+    import scala.concurrent.duration._
+    val t2 = Process.awakeEvery(2 seconds).forwardFill.zip {
+             Process.awakeEvery(100 milliseconds).take(100)
+           }.run.timed(15000).run
+    true
+  }
 
   property("range") = secure {
     Process.range(0, 100).runLog.run == IndexedSeq.range(0, 100) &&
@@ -261,18 +268,18 @@ object ProcessSpec extends Properties("Process") {
     true
   }
 
-//  property("feedL") = secure {
-//    val w = wye.feedL(List.fill(10)(1))(process1.id)
-//    val x = Process.range(0,100).wye(halt)(w).runLog.run
-//    x.toList == (List.fill(10)(1) ++ List.range(0,100))
-//  }
-//
-//  property("feedR") = secure {
-//    val w = wye.feedR(List.fill(10)(1))(wye.merge[Int])
-//    val x = Process.range(0,100).wye(halt)(w).runLog.run
-//    x.toList == (List.fill(10)(1) ++ List.range(0,100))
-//  }
-//
+  property("feedL") = secure {
+    val w = wye.feedL(List.fill(10)(1))(process1.id)
+    val x = Process.range(0,100).wye(halt)(w).runLog.run
+    x.toList == (List.fill(10)(1) ++ List.range(0,100))
+  }
+
+  property("feedR") = secure {
+    val w = wye.feedR(List.fill(10)(1))(wye.merge[Int])
+    val x = Process.range(0,100).wye(halt)(w).runLog.run
+    x.toList == (List.fill(10)(1) ++ List.range(0,100))
+  }
+
   property("either") = secure {
     val w = wye.either[Int,Int]
     val s = Process.constant(1).take(1)
@@ -296,17 +303,17 @@ object ProcessSpec extends Properties("Process") {
 //    l === List(0, 1, 1, 2, 3, 5, 8, 13, 21, 34)
 //  }
 
-//  property("chunkBy2") = secure {
-//    val s = Process(3, 5, 4, 3, 1, 2, 6)
-//    s.chunkBy2(_ < _).toList == List(Vector(3, 5), Vector(4), Vector(3), Vector(1, 2, 6)) &&
-//    s.chunkBy2(_ > _).toList == List(Vector(3), Vector(5, 4, 3, 1), Vector(2), Vector(6))
-//  }
+  property("chunkBy2") = secure {
+    val s = Process(3, 5, 4, 3, 1, 2, 6)
+    s.chunkBy2(_ < _).toList == List(Vector(3, 5), Vector(4), Vector(3), Vector(1, 2, 6)) &&
+    s.chunkBy2(_ > _).toList == List(Vector(3), Vector(5, 4, 3, 1), Vector(2), Vector(6))
+  }
 
-//  property("duration") =  {
-//    val firstValueDiscrepancy = duration.take(1).runLast.run.get
-//    val reasonableError = 200 * 1000000 // 200 millis
-//    (firstValueDiscrepancy.toNanos < reasonableError) :| "duration is near zero at first access"
-//  }
+  property("duration") =  {
+    val firstValueDiscrepancy = duration.take(1).runLast.run.get
+    val reasonableError = 200 * 1000000 // 200 millis
+    (firstValueDiscrepancy.toNanos < reasonableError) :| "duration is near zero at first access"
+  }
 
   implicit def arbVec[A:Arbitrary]: Arbitrary[IndexedSeq[A]] =
     Arbitrary(Gen.listOf(arbitrary[A]).map(_.toIndexedSeq))
@@ -343,75 +350,34 @@ object ProcessSpec extends Properties("Process") {
   }
    import scala.concurrent.duration._
   val smallDelay = Gen.choose(10, 300) map {_.millis}
-//  property("every") =
-//    forAll(smallDelay) { delay: Duration =>
-//      type BD = (Boolean, Duration)
-//      val durationSinceLastTrue: Process1[BD, BD] = {
-//        def go(lastTrue: Duration): Process1[BD,BD] = {
-//          await1 flatMap { pair:(Boolean, Duration) => pair match {
-//            case (true , d) => emit((true , d - lastTrue)) fby go(d)
-//            case (false, d) => emit((false, d - lastTrue)) fby go(lastTrue)
-//          } }
-//        }
-//        go(0.seconds)
-//      }
-//
-//      val draws = (600.millis / delay) min 10 // don't take forever
-//
-//      val durationsSinceSpike = every(delay).
-//                   tee(duration)(tee zipWith {(a,b) => (a,b)}).
-//                   take(draws.toInt) |>
-//                   durationSinceLastTrue
-//
-//      val result = durationsSinceSpike.runLog.run.toList
-//      val (head :: tail) = result
-//
-//      head._1 :| "every always emits true first" &&
-//      tail.filter   (_._1).map(_._2).forall { _ >= delay } :| "true means the delay has passed" &&
-//      tail.filterNot(_._1).map(_._2).forall { _ <= delay } :| "false means the delay has not passed"
-//  }
+  property("every") =
+    forAll(smallDelay) { delay: Duration =>
+      type BD = (Boolean, Duration)
+      val durationSinceLastTrue: Process1[BD, BD] = {
+        def go(lastTrue: Duration): Process1[BD,BD] = {
+          await1 flatMap { pair:(Boolean, Duration) => pair match {
+            case (true , d) => emit((true , d - lastTrue)) fby go(d)
+            case (false, d) => emit((false, d - lastTrue)) fby go(lastTrue)
+          } }
+        }
+        go(0.seconds)
+      }
 
-//  property("runStep") = secure {
-//    def go(p:Process[Task,Int], acc:Seq[Throwable \/ Int]) : Throwable \/ Seq[Throwable \/ Int] = {
-//      p.runStep.run match {
-//        case Step(-\/(e),Halt(_),Halt(_)) => \/-(acc)
-//        case Step(-\/(e),Halt(_), c) => go(c,acc :+ -\/(e))
-//        case Step(-\/(e),t,_) => go(t,acc :+ -\/(e))
-//        case Step(\/-(a),t,_) => go(t,acc ++ a.map(\/-(_)))
-//      }
-//    }
-//
-//    val ex = new java.lang.Exception("pure")
-//
-//    val p1 = Process.range(10,12)
-//    val p2 = Process.range(20,22) ++ Process.suspend(eval(Task.fail(ex))) onFailure(Process(100).toSource)
-//    val p3 = Process.await(Task.delay(1))(i=> throw ex,halt,emit(200)) //throws exception in `pure` code
-//
-//    go((p1 ++ p2) onComplete p3, Vector()) match {
-//      case -\/(e) => false
-//      case \/-(c) =>
-//        c == List(
-//          right(10),right(11)
-//          , right(20),right(21),left(ex),right(100)
-//          , left(ex), right(200)
-//        )
-//    }
-//
-//  }
-//
-//
-//  property("runStep.stackSafety") = secure {
-//    def go(p:Process[Task,Int], acc:Int) : Int = {
-//      p.runStep.run match {
-//        case Step(-\/(e),Halt(_),_) => acc
-//        case Step(-\/(e),t,_) => go(t,acc)
-//        case Step(\/-(a),t,_) => go(t,acc + a.sum)
-//      }
-//    }
-//    val s = 1 until 10000
-//    val p1 = s.foldLeft[Process[Task,Int]](halt)({case (p,n)=>Emit(Vector(n),p)})
-//    go(p1,0) == s.sum
-//  }
+      val draws = (600.millis / delay) min 10 // don't take forever
+
+      val durationsSinceSpike = every(delay).
+                   tee(duration)(tee zipWith {(a,b) => (a,b)}).
+                   take(draws.toInt) |>
+                   durationSinceLastTrue
+
+      val result = durationsSinceSpike.runLog.run.toList
+      val (head :: tail) = result
+
+      head._1 :| "every always emits true first" &&
+      tail.filter   (_._1).map(_._2).forall { _ >= delay } :| "true means the delay has passed" &&
+      tail.filterNot(_._1).map(_._2).forall { _ <= delay } :| "false means the delay has not passed"
+  }
+
 
 
 
