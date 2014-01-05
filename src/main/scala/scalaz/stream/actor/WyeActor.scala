@@ -305,21 +305,21 @@ object WyeActor {
           if (L.isDone && R.isDone) completeOut(cb, -\/(e))
           ny
 
-        case (_, ny@AwaitL_(_)) =>
+        case (_, ny@AwaitL(_)) =>
           debug("WYE_AWL",L,R,ny)
           L.doneBy match {
             case Some(e) => tryCompleteOut(cb, ny.killBy(e))
             case None    => L.pull(a); ny
           }
 
-        case (_, ny@AwaitR_(_)) =>
+        case (_, ny@AwaitR(_)) =>
           debug("WYE_AWR",L,R,ny)
           R.doneBy match {
             case Some(e) => tryCompleteOut(cb, ny.killBy(e))
             case None    => R.pull(a); ny
           }
 
-        case (_, ny@AwaitBoth_(_)) =>
+        case (_, ny@AwaitBoth(_)) =>
           debug("WYE_AWB",ny,L,R)
           (L.doneBy, R.doneBy) match {
             case (Some(e), Some(_)) => tryCompleteOut(cb, ny.killBy(e))
