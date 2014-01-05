@@ -130,20 +130,22 @@ sealed abstract class Process[+F[_],+O] {
 
   }
 
+  //hard workaround for Vector bug @see SI-7725.
+  private def fast_++[X](s1:Seq[X],s2:Seq[X]):Seq[X] = {
+    @tailrec
+    def go(v1:Vector[X], t:Seq[X]):Seq[X] = {
+      if (t.isEmpty) v1
+      else go(v1 :+ t.head, t.tail)
+    }
+    go(s1.toVector,s2)
+  }
+
   /**
    * Run this `Process`, then, if it halts without an error, run `p2`.
    * Note that `p2` is appended to the `fallback` argument of any `Await`
    * produced by this `Process`. If this is not desired, use `fby`.
    */
   final def append[F2[x]>:F[x], B>:O](p2: => Process[F2,B]): Process[F2,B] = {
-    //hard workaround for Vector bug @see SI-7725.
-    def fast_++[X](s1:Seq[X],s2:Seq[X]):Seq[X] = {
-      def go(v1:Vector[X], t:Seq[X]):Seq[X] = {
-        if (t.isEmpty) v1
-        else go(v1 :+ t.head, t.tail)
-      }
-      go(s1.toVector,s2)
-    }
     this match {
       case h@Halt(End) =>
         try p2
@@ -847,20 +849,20 @@ sealed abstract class Process[+F[_],+O] {
     def go(cur: Process[F2,O], acc: B): F2[B] = {
       cur match {
         case Emit(h,t:Process[F2,O]@unchecked) =>
-          debug("RUNFM_EMIT",h,t)
+          debug("RUN_FM_EMIT",h,t)
           go(t,h.foldLeft(acc)((x, y) => B.append(x, f(y))))
         case Halt(e) =>
-          debug("RUNFM_HALT",e)
+          debug("RUN_FM_HALT",e)
 
           e match {
           case End => F.point(acc)
           case _ => C.fail(e)
         }
         case AwaitF_(req,recv) =>
-          debug("RUNFMAW",req,recv)
+          debug("RUN_FM_AW",req,recv)
           F.bind (C.attempt(req))({r =>
-            debug("RUNFMAW_RCV",r)
-            go(recv(r).run,acc)})
+            debug("RUN_FM_AW_RCV",r)
+            go(recv.runSafely(r),acc)})
       }
     }
     go(this, B.zero)
@@ -1221,6 +1223,8 @@ object Process {
     recv: Throwable \/ R => Trampoline[Process[F,A]]) extends NotReady[F,A]
 
 
+
+
   object AwaitF_{
     private[stream] def unapply[F[_],A](self: Process[F,A]):
     Option[(F[Any], Throwable \/ Any => Trampoline[Process[F,A]])] = self match {
@@ -1328,7 +1332,7 @@ object Process {
 
 
   def await_[F[_],R,A](req:F[R])(recv: Throwable \/ R => Trampoline[Process[F,A]]): Process[F,A] =
-    Await_[F,R,A](req, r => recv(r))
+    Await_[F,R,A](req, recv)
 
 
 
@@ -1541,6 +1545,19 @@ object Process {
    * the elements of the `Process`.
    */
   def toTask[A](p: Process[Task,A]): Task[A] = {
+    import Process.ProcessTaskSyntax
+    var cur = p
+    def go: Task[A] = cur match {
+      case Halt(e) => Task.fail(e)
+      case Emit(h, t) =>
+        if (h.isEmpty) { cur = t; go }
+        else { val ret = Task.now(h.head); cur = Emit(h.tail, t); ret }
+      case AwaitF_(req, recv) =>
+        req.attempt.flatMap { r=> cur = recv.runSafely(r); go}
+    }
+    Task.delay(go).flatMap(a => a)
+
+
 //    var cur = p
 //    def go: Task[A] = cur match {
 //      case Halt(e) => Task.fail(e)
@@ -1556,7 +1573,6 @@ object Process {
 //    }
 //    Task.delay(go).flatMap(a => a)
 
-    ???
   }
 
   /**
@@ -1872,7 +1888,11 @@ object Process {
 
         var actor :Actor[M] = null
 
-        actor = Actor[M]({
+        actor = Actor[M]( msg => {
+
+        debug("RNSA", msg)
+
+        msg match {
           case Next(p) if !done.get =>
             @tailrec
             def go(cur: Process[Task, O]) : Unit = {
@@ -1940,12 +1960,13 @@ object Process {
             cln = None
 
           case _ => //no-op when we are done...
-        })(Strategy.Sequential)
+        }})(Strategy.Sequential)
 
         actor ! Next(p)
         Interruption(() => actor ! Interrupt )
       }
 
+      debug("RUNSTP", self)
       self.unemit match {
         case (Seq(),next) => runAwaitStep(next)
         case (out, next) =>
@@ -2485,8 +2506,12 @@ object Process {
    * eval an arbitrary effect in a `Process`. The resulting `Process` will emit values
    * until evaluation of `t` signals termination with `End` or an error occurs.
    */
-  def repeatEval[F[_],O](t: F[O]): Process[F,O] =
-    eval(t).repeat
+  def repeatEval[F[_],O](t: F[O]): Process[F,O] = {
+    await_(t)({
+      case -\/(e) => Trampoline.done(Halt(e))
+      case \/-(o) => Trampoline.delay(emit(o) fby repeatEval(t))
+    })
+  }
 
   /**
    * Produce `p` lazily, guarded by a single `Await`. Useful if

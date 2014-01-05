@@ -7,14 +7,25 @@ import scala.annotation.tailrec
 import scalaz._
 import scalaz.concurrent.{Strategy, Actor, Task}
 import scalaz.stream.Process._
-import scalaz.stream.{Step_, Step, Process, wye}
-import scalaz.stream.wye.{AwaitBoth, AwaitR, AwaitL}
+import scalaz.stream._
+import scalaz.stream.wye._
 import scalaz.stream.Step_.{Cont, Interruption}
 import scalaz.Free._
 import scalaz.stream.Process.Emit
 import scalaz.stream.Process.suspend
 import scala.Some
 import scalaz.stream.Step_.Interruption
+import scalaz.\/-
+import scalaz.-\/
+import scalaz.stream.Process.Halt
+import scalaz.stream.Process.Emit
+import scala.Some
+import scalaz.stream.Process.Wye
+import scalaz.\/-
+import scalaz.-\/
+import scalaz.stream.Process.Halt
+import scalaz.stream.Process.Emit
+import scala.Some
 import scalaz.\/-
 import scalaz.-\/
 import scalaz.stream.Process.Halt
@@ -181,7 +192,8 @@ object WyeActor {
 
     //feeds the wye by element or signals halt to wye, producing next state of process
     def receive(step: Step_[Task, A])(y2: Wye[L, R, O]): Wye[L, R, O] = {
-      step match {
+      debug("WYE_RCVD",this,step, y2)
+      val ny = step match {
         case Step_.Done(rsn) =>
           state = Done(rsn)
           haltA(rsn)(y2)
@@ -189,6 +201,8 @@ object WyeActor {
           state = Ready(t,recvt)
           feedA(h)(y2)
       }
+      debug("WYE_RCVD",this,step, ny)
+      ny
     }
 
     def isDone: Boolean = doneBy.isDefined
@@ -250,13 +264,13 @@ object WyeActor {
     case class LeftWyeSide(var state: WyeSideState[L] = Done(End)) extends WyeSideOps[L,L,R,O] {
       def feedA(as: Seq[L])(y2: Process.Wye[L, R, O]): Process.Wye[L, R, O] = wye.feedL(as)(y2)
       def haltA(e: Throwable)(y2: Process.Wye[L, R, O]): Process.Wye[L, R, O] = wye.haltL(e)(y2)
-      override def toString: String = "Left"
+      override def toString: String = s"Left: $state"
     }
 
     case class RightWyeSide(var state: WyeSideState[R] = Done(End)) extends WyeSideOps[R,L,R,O] {
       def feedA(as: Seq[R])(y2: Process.Wye[L, R, O]): Process.Wye[L, R, O] = wye.feedR(as)(y2)
       def haltA(e: Throwable)(y2: Process.Wye[L, R, O]): Process.Wye[L, R, O] = wye.haltR(e)(y2)
-      override def toString: String = "Right"
+      override def toString: String = s"Right: $state"
     }
 
     val L: LeftWyeSide = LeftWyeSide()
@@ -265,6 +279,7 @@ object WyeActor {
     yy = R.receive(Step_.init(pr))(yy)
 
     def completeOut(cb: (Throwable \/ Seq[O]) => Unit, r: Throwable \/ Seq[O]): Unit = {
+      debug("WYE_CPL_OUT",r,yy,L,R)
       out = None
       S(cb(r))
     }
@@ -277,28 +292,35 @@ object WyeActor {
       y2.unemit match {
         // This is never case when handling `Terminate` request because wye is killed.
         case (h, ny) if h.nonEmpty =>
+          debug("WYE_HD",L,R,h,ny)
           completeOut(cb, \/-(h))
           ny
 
         // Terminate both sides when wye is `Halt`.
         case (_, ny@Halt(e))  =>
+          debug("WYE_HLT",L,R,ny)
           L.terminate(e, a)
           R.terminate(e, a)
           // Ensures that we don't complete `Terminate` request before all sides are done.
           if (L.isDone && R.isDone) completeOut(cb, -\/(e))
           ny
 
-        case (_, ny@AwaitL(_, _, _)) => L.doneBy match {
+        case (_, ny@AwaitL_(_)) =>
+          debug("WYE_AWL",L,R,ny)
+          L.doneBy match {
             case Some(e) => tryCompleteOut(cb, ny.killBy(e))
             case None    => L.pull(a); ny
           }
 
-        case (_, ny@AwaitR(_, _, _)) => R.doneBy match {
+        case (_, ny@AwaitR_(_)) =>
+          debug("WYE_AWR",L,R,ny)
+          R.doneBy match {
             case Some(e) => tryCompleteOut(cb, ny.killBy(e))
             case None    => R.pull(a); ny
           }
 
-        case (_, ny@AwaitBoth(_, _, _)) =>
+        case (_, ny@AwaitBoth_(_)) =>
+          debug("WYE_AWB",ny,L,R)
           (L.doneBy, R.doneBy) match {
             case (Some(e), Some(_)) => tryCompleteOut(cb, ny.killBy(e))
             case _ =>
@@ -308,13 +330,17 @@ object WyeActor {
           }
 
         case (_, Emit(_, _)) =>
+          debug("WYE_EMT",L,R,y2)
           val e = new Exception("Impossible: Emit after unemit?")
           completeOut(cb,-\/(e))
           Halt(e)
       }
     }
 
-    a = Actor.actor[Msg]({
+    a = Actor[Msg](msg => {
+      debug("WYE_ACT",msg, out)
+    msg match {
+
       case StepCompleted(side: WyeSide[Any,L,R,O]@unchecked, step) =>
         leftBias = side == R
         val ny = side.receive(step)(yy)
@@ -332,6 +358,7 @@ object WyeActor {
         out = Some(cbOut)
         yy = tryCompleteOut(cbOut, yy.killBy(cause))
 
+    }
     })(S)
 
     repeatEval(Task.async[Seq[O]](cb => a ! Get(cb))).flatMap(emitSeq(_)) onComplete

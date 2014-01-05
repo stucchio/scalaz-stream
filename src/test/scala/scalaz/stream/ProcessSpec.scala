@@ -225,15 +225,15 @@ object ProcessSpec extends Properties("Process") {
 //    p.zip(ones).runLog.run == IndexedSeq(1 -> 1, 2 -> 1, 3 -> 1)
 //  }
 
-//  property("merge") = secure {
-//    import scala.concurrent.duration._
-//    val sleepsL = Process.awakeEvery(1 seconds).take(3)
-//    val sleepsR = Process.awakeEvery(100 milliseconds).take(30)
-//    val sleeps = sleepsL merge sleepsR
-//    val p = sleeps.toTask
-//    val tasks = List.fill(10)(p.timed(500).attemptRun)
-//    tasks.forall(_.isRight)
-//  }
+  property("merge") = secure {
+    import scala.concurrent.duration._
+    val sleepsL = Process.awakeEvery(1 seconds).take(3)
+    val sleepsR = Process.awakeEvery(100 milliseconds).take(30)
+    val sleeps = sleepsL merge sleepsR
+    val p = sleeps.toTask
+    val tasks = List.fill(10)(p.timed(500).attemptRun)
+    tasks.forall(_.isRight)
+  }
 
 //  property("forwardFill") = secure {
 //    import scala.concurrent.duration._
@@ -273,11 +273,11 @@ object ProcessSpec extends Properties("Process") {
 //    x.toList == (List.fill(10)(1) ++ List.range(0,100))
 //  }
 //
-//  property("either") = secure {
-//    val w = wye.either[Int,Int]
-//    val s = Process.constant(1).take(1)
-//    s.wye(s)(w).runLog.run.map(_.fold(identity, identity)).toList == List(1,1)
-//  }
+  property("either") = secure {
+    val w = wye.either[Int,Int]
+    val s = Process.constant(1).take(1)
+    s.wye(s)(w).runLog.timed(3000).run.map(_.fold(identity, identity)).toList == List(1,1)
+  }
 
   property("last") = secure {
     var i = 0
@@ -335,12 +335,12 @@ object ProcessSpec extends Properties("Process") {
     }
   }
 
-//  property("interrupt") = secure {
-//    val p1 = Process(1,2,3,4,6).toSource
-//    val i1 = repeatEval(Task.now(false))
-//    val v = i1.wye(p1)(wye.interrupt).runLog.run.toList
-//    v == List(1,2,3,4,6)
-//  }
+  property("interrupt") = secure {
+    val p1 = Process(1,2,3,4,6).toSource
+    val i1 = repeatEval(Task.now(false))
+    val v = i1.wye(p1)(wye.interrupt).runLog.timed(3000).run.toList
+    v == List(1,2,3,4,6)
+  }
    import scala.concurrent.duration._
   val smallDelay = Gen.choose(10, 300) map {_.millis}
 //  property("every") =
