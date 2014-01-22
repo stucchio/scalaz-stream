@@ -16,7 +16,7 @@ object WyeActor {
   val Interrupted = new InterruptedException {
     override def fillInStackTrace(): Throwable = this
   }
-  
+
   /**
    * Evaluates one step of the process `p` and calls the callback `cb` with the evaluated step `s`.
    * Returns a function for interrupting the evaluation.
@@ -52,7 +52,7 @@ object WyeActor {
    *
    */
   final def runStepAsyncInterruptibly[O](p: Process[Task,O])(cb: Step[Task,O] => Unit): () => Unit = {
-   
+
 
     trait RunningTask {
       def interrupt: Unit
@@ -75,7 +75,7 @@ object WyeActor {
     }
 
     def go(cur: Process[Task,O], cleanup: Process[Task,O]): Task[Step[Task,O]] = {
-      def onAwait[A](req: Task[A], recv: A => Process[Task,O], fb: Process[Task,O], c: Process[Task,O]): Task[Step[Task,O]] = {
+      def onAwait[A](req: Task[A], recv: A => Process[Task,O], fb: => Process[Task,O], c: => Process[Task,O]): Task[Step[Task,O]] = {
         // We must ensure that the callback `cb` is called exactly once.
         //
         // There are currently two cases who calls the callback:
@@ -107,7 +107,7 @@ object WyeActor {
           val hh = h ++ nh
           if (hh.isEmpty) go(nt, cleanup)
           else Task.now(Step(\/-(hh), nt, cleanup))
-        case Await(req, recv, fb, c) => onAwait(req, recv, fb, c)
+        case Await(req, recv, fb, c) => onAwait(req, recv, fb(), c())
       }
     }
 

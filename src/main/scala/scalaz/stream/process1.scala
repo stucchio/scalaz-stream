@@ -127,8 +127,8 @@ trait process1 {
           val next =
             try recv(in.head)
             catch {
-              case End => fb
-              case e: Throwable => c.causedBy(e)
+              case End => fb()
+              case e: Throwable => c().causedBy(e)
             }
           go(in.tail, out, next)
       }
@@ -290,7 +290,7 @@ trait process1 {
     case h@Halt(_) => h
     case Emit(h, t) => Emit(Seq((h, p)), record(t))
     case Await1(recv, fb, c) =>
-      Emit(Seq((List(), p)), await1[I].flatMap(recv andThen (record[I,O])).orElse(record(fb),record(c)))
+      Emit(Seq((List(), p)), await1[I].flatMap(recv andThen (record[I,O])).orElse(record(fb()),record(c())))
   }
 
   /**

@@ -231,14 +231,14 @@ object wye extends wye {
         case Await1(recvp, fbp, cp) =>
           await(L[I0]: Env[I0,I2]#Y[I0])(
             recvp andThen (attachL(_)(w)),
-            attachL(fbp)(w),
-            attachL(cp)(w))
-        case h@Halt(_) => attachL(h)(fb)
+            attachL(fbp())(w),
+            attachL(cp())(w))
+        case h@Halt(_) => attachL(h)(fb())
       }
 
     case AwaitR(recv, fb, c) =>
       awaitR[I2].flatMap(recv andThen (attachL(p)(_))).
-      orElse(attachL(p)(fb), attachL(p)(c))
+      orElse(attachL(p)(fb()), attachL(p)(c()))
     case AwaitBoth(recv, fb, c) =>
       p match {
         case Emit(h, t) => attachL(t)(scalaz.stream.wye.feedL(h)(w))
@@ -250,10 +250,10 @@ object wye extends wye {
               case HaltL(e) => attachL(p.causedBy(e))(haltL(e)(w))
               case HaltR(e) => attachL(p)(haltR(e)(w))
             },
-            attachL(fbp)(w),
-            attachL(cp)(w))
-        case h@Halt(End) => attachL(h)(fb)
-        case h@Halt(e) => attachL(h)(c.causedBy(e))
+            attachL(fbp())(w),
+            attachL(cp())(w))
+        case h@Halt(End) => attachL(h)(fb())
+        case h@Halt(e) => attachL(h)(c().causedBy(e))
       }
   }
 
@@ -295,21 +295,21 @@ object wye extends wye {
           val next =
             try recv(in.head)
             catch {
-              case End => fb
-              case e: Throwable => c.causedBy(e)
+              case End => fb()
+              case e: Throwable => c().causedBy(e)
             }
           go(in.tail, out, next)
         case AwaitBoth(recv, fb, c) =>
           val next =
             try recv(ReceiveY.ReceiveL(in.head))
             catch {
-              case End => fb
-              case e: Throwable => c.causedBy(e)
+              case End => fb()
+              case e: Throwable => c().causedBy(e)
             }
           go(in.tail, out, next)
         case AwaitR(recv, fb, c) =>
           emitSeq(out.flatten,
-          await(R[I2]: Env[I,I2]#Y[I2])(recv andThen (feedL(in)), feedL(in)(fb), feedL(in)(c)))
+          await(R[I2]: Env[I,I2]#Y[I2])(recv andThen (feedL(in)), feedL(in)(fb()), feedL(in)(c())))
       }
       else emitSeq(out.flatten, cur)
     go(i, Vector(), p)
@@ -327,21 +327,21 @@ object wye extends wye {
           val next =
             try recv(in.head)
             catch {
-              case End => fb
-              case e: Throwable => c.causedBy(e)
+              case End => fb()
+              case e: Throwable => c().causedBy(e)
             }
           go(in.tail, out, next)
         case AwaitBoth(recv, fb, c) =>
           val next =
             try recv(ReceiveY.ReceiveR(in.head))
             catch {
-              case End => fb
-              case e: Throwable => c.causedBy(e)
+              case End => fb()
+              case e: Throwable => c().causedBy(e)
             }
           go(in.tail, out, next)
         case AwaitL(recv, fb, c) =>
           emitSeq(out.flatten,
-          await(L[I]: Env[I,I2]#Y[I])(recv andThen (feedR(in)), feedR(in)(fb), feedR(in)(c)))
+          await(L[I]: Env[I,I2]#Y[I])(recv andThen (feedR(in)), feedR(in)(fb()), feedR(in)(c())))
       }
       else emitSeq(out.flatten, cur)
     go(i, Vector(), p)
@@ -355,12 +355,12 @@ object wye extends wye {
         val (nh,nt) = t.unemit
         Emit(h ++ nh, haltL(e)(nt))
       case AwaitL(rcv,fb,c) => p.killBy(e)
-      case AwaitR(rcv,fb,c) => await(R[I2]: Env[I,I2]#Y[I2])(rcv, haltL(e)(fb), haltL(e)(c))
+      case AwaitR(rcv,fb,c) => await(R[I2]: Env[I,I2]#Y[I2])(rcv, haltL(e)(fb()), haltL(e)(c()))
       case AwaitBoth(rcv,fb,c) =>
         try rcv(ReceiveY.HaltL(e))
         catch {
-          case End => fb
-          case e: Throwable =>  c.causedBy(e)
+          case End => fb()
+          case e: Throwable =>  c().causedBy(e)
         }
     }
   }
@@ -371,12 +371,12 @@ object wye extends wye {
         val (nh,nt) = t.unemit
         Emit(h ++ nh, haltR(e)(nt))
       case AwaitR(rcv,fb,c) => p.killBy(e)
-      case AwaitL(rcv,fb,c) => await(L[I]: Env[I,I2]#Y[I])(rcv, haltR(e)(fb), haltR(e)(c))
+      case AwaitL(rcv,fb,c) => await(L[I]: Env[I,I2]#Y[I])(rcv, haltR(e)(fb()), haltR(e)(c()))
       case AwaitBoth(rcv,fb,c) =>
         try rcv(ReceiveY.HaltR(e))
         catch {
-          case End => fb
-          case e: Throwable =>  c.causedBy(e)
+          case End => fb()
+          case e: Throwable =>  c().causedBy(e)
         }
     }
   }
@@ -388,11 +388,11 @@ object wye extends wye {
     case h@Halt(_) => h
     case Emit(h, t) => Emit(h, flip(t))
     case AwaitL(recv, fb, c) =>
-      await(R[I]: Env[I2,I]#Y[I])(recv andThen (flip), flip(fb), flip(c))
+      await(R[I]: Env[I2,I]#Y[I])(recv andThen (flip), flip(fb()), flip(c()))
     case AwaitR(recv, fb, c) =>
-      await(L[I2]: Env[I2,I]#Y[I2])(recv andThen (flip), flip(fb), flip(c))
+      await(L[I2]: Env[I2,I]#Y[I2])(recv andThen (flip), flip(fb()), flip(c()))
     case AwaitBoth(recv, fb, c) =>
-      await(Both[I2,I])((t: ReceiveY[I2,I]) => flip(recv(t.flip)), flip(fb), flip(c))
+      await(Both[I2,I])((t: ReceiveY[I2,I]) => flip(recv(t.flip)), flip(fb()), flip(c()))
   }
 
   /**
@@ -419,8 +419,8 @@ object wye extends wye {
             i0 => emit(left(i0)) ++ liftR(w),
             i => liftR[I0,I,I2,O](recv(i))
           ))
-        val fb2 = liftR[I0,I,I2,O](fb)
-        val c2 = liftR[I0,I,I2,O](c)
+        val fb2 = liftR[I0,I,I2,O](fb())
+        val c2 = liftR[I0,I,I2,O](c())
         w2.orElse(fb2, c2)
       case AwaitR(recv, fb, c) =>
         val w2: Wye[I0 \/ I, I0 \/ I2, I0 \/ O] =
@@ -428,18 +428,18 @@ object wye extends wye {
             i0 => emit(left(i0)) ++ liftR(w),
             i => liftR[I0,I,I2,O](recv(i))
           ))
-        val fb2 = liftR[I0,I,I2,O](fb)
-        val c2 = liftR[I0,I,I2,O](c)
+        val fb2 = liftR[I0,I,I2,O](fb())
+        val c2 = liftR[I0,I,I2,O](c())
         w2.orElse(fb2, c2)
       case AwaitBoth(recv, fb, c) =>
         val w2: Wye[I0 \/ I, I0 \/ I2, I0 \/ O] = awaitBoth[I0 \/ I, I0 \/ I2].flatMap {
-          case ReceiveL(io) => feed1(ReceiveL(io))(liftR(AwaitL(recv compose ReceiveL.apply, fb, c)))
-          case ReceiveR(io) => feed1(ReceiveR(io))(liftR(AwaitR(recv compose ReceiveR.apply, fb, c)))
+          case ReceiveL(io) => feed1(ReceiveL(io))(liftR(AwaitL(recv compose ReceiveL.apply, fb(), c())))
+          case ReceiveR(io) => feed1(ReceiveR(io))(liftR(AwaitR(recv compose ReceiveR.apply, fb(), c())))
           case HaltL(e) => liftR(w)
           case HaltR(e) => liftR(w)
         }
-        val fb2 = liftR[I0,I,I2,O](fb)
-        val c2 = liftR[I0,I,I2,O](c)
+        val fb2 = liftR[I0,I,I2,O](fb())
+        val c2 = liftR[I0,I,I2,O](c())
         w2.orElse(fb2, c2)
     }
 
@@ -453,35 +453,35 @@ object wye extends wye {
 
   object AwaitL {
     def unapply[I,I2,O](self: Wye[I,I2,O]):
-        Option[(I => Wye[I,I2,O], Wye[I,I2,O], Wye[I,I2,O])] = self match {
+        Option[(I => Wye[I,I2,O], () => Wye[I,I2,O], () => Wye[I,I2,O])] = self match {
       case Await(req,recv,fb,c) if req.tag == 0 => Some((recv.asInstanceOf[I => Wye[I,I2,O]], fb, c))
       case _ => None
     }
     def apply[I,I2,O](recv: I => Wye[I,I2,O],
-                      fallback: Wye[I,I2,O] = halt,
-                      cleanup: Wye[I,I2,O] = halt): Wye[I,I2,O] =
+                      fallback: => Wye[I,I2,O] = halt,
+                      cleanup: => Wye[I,I2,O] = halt): Wye[I,I2,O] =
       await(L[I]: Env[I,I2]#Y[I])(recv, fallback, cleanup)
   }
   object AwaitR {
     def unapply[I,I2,O](self: Wye[I,I2,O]):
-        Option[(I2 => Wye[I,I2,O], Wye[I,I2,O], Wye[I,I2,O])] = self match {
+        Option[(I2 => Wye[I,I2,O], () => Wye[I,I2,O], () => Wye[I,I2,O])] = self match {
       case Await(req,recv,fb,c) if req.tag == 1 => Some((recv.asInstanceOf[I2 => Wye[I,I2,O]], fb, c))
       case _ => None
     }
     def apply[I,I2,O](recv: I2 => Wye[I,I2,O],
-                      fallback: Wye[I,I2,O] = halt,
-                      cleanup: Wye[I,I2,O] = halt): Wye[I,I2,O] =
+                      fallback: => Wye[I,I2,O] = halt,
+                      cleanup: => Wye[I,I2,O] = halt): Wye[I,I2,O] =
       await(R[I2]: Env[I,I2]#Y[I2])(recv, fallback, cleanup)
   }
   object AwaitBoth {
     def unapply[I,I2,O](self: Wye[I,I2,O]):
-        Option[(ReceiveY[I,I2] => Wye[I,I2,O], Wye[I,I2,O], Wye[I,I2,O])] = self match {
+        Option[(ReceiveY[I,I2] => Wye[I,I2,O], () => Wye[I,I2,O], () => Wye[I,I2,O])] = self match {
       case Await(req,recv,fb,c) if req.tag == 2 => Some((recv.asInstanceOf[ReceiveY[I,I2] => Wye[I,I2,O]], fb, c))
       case _ => None
     }
     def apply[I,I2,O](recv: ReceiveY[I,I2] => Wye[I,I2,O],
-                      fallback: Wye[I,I2,O] = halt,
-                      cleanup: Wye[I,I2,O] = halt): Wye[I,I2,O] =
+                      fallback: => Wye[I,I2,O] = halt,
+                      cleanup: => Wye[I,I2,O] = halt): Wye[I,I2,O] =
       await(Both[I,I2])(recv, fallback, cleanup)
   }
 }

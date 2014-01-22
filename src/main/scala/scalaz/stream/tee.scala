@@ -70,13 +70,13 @@ object tee extends tee {
           val next =
             try recv(in.head)
             catch {
-              case End => fb
+              case End => fb()
               case e: Throwable => Halt(e)
             }
           go(in.tail, out, next)
         case AwaitR(recv, fb, c) =>
           emitSeq(out.flatten,
-          await(R[I2]: Env[I,I2]#T[I2])(recv andThen (feedL(in)), feedL(in)(fb), feedL(in)(c)))
+          await(R[I2]: Env[I,I2]#T[I2])(recv andThen (feedL(in)), feedL(in)(fb()), feedL(in)(c())))
       }
       else emitSeq(out.flatten, cur)
     go(i, Vector(), p)
@@ -93,13 +93,13 @@ object tee extends tee {
           val next =
             try recv(in.head)
             catch {
-              case End => fb
+              case End => fb()
               case e: Throwable => Halt(e)
             }
           go(in.tail, out, next)
         case AwaitL(recv, fb, c) =>
           emitSeq(out.flatten,
-          await(L[I]: Env[I,I2]#T[I])(recv andThen (feedR(in)), feedR(in)(fb), feedR(in)(c)))
+          await(L[I]: Env[I,I2]#T[I])(recv andThen (feedR(in)), feedR(in)(fb()), feedR(in)(c())))
       }
       else emitSeq(out.flatten, cur)
     go(i, Vector(), p)
@@ -115,24 +115,24 @@ object tee extends tee {
 
   object AwaitL {
     def unapply[I,I2,O](self: Tee[I,I2,O]):
-        Option[(I => Tee[I,I2,O], Tee[I,I2,O], Tee[I,I2,O])] = self match {
+        Option[(I => Tee[I,I2,O], () => Tee[I,I2,O], () => Tee[I,I2,O])] = self match {
       case Await(req,recv,fb,c) if req.tag == 0 => Some((recv.asInstanceOf[I => Tee[I,I2,O]], fb, c))
       case _ => None
     }
     def apply[I,I2,O](recv: I => Tee[I,I2,O],
-                      fallback: Tee[I,I2,O] = halt,
-                      cleanup: Tee[I,I2,O] = halt): Tee[I,I2,O] =
+                      fallback: => Tee[I,I2,O] = halt,
+                      cleanup: => Tee[I,I2,O] = halt): Tee[I,I2,O] =
       await(L[I]: Env[I,I2]#T[I])(recv, fallback, cleanup)
   }
   object AwaitR {
     def unapply[I,I2,O](self: Tee[I,I2,O]):
-        Option[(I2 => Tee[I,I2,O], Tee[I,I2,O], Tee[I,I2,O])] = self match {
+        Option[(I2 => Tee[I,I2,O], () => Tee[I,I2,O], () => Tee[I,I2,O])] = self match {
       case Await(req,recv,fb,c) if req.tag == 1 => Some((recv.asInstanceOf[I2 => Tee[I,I2,O]], fb, c))
       case _ => None
     }
     def apply[I,I2,O](recv: I2 => Tee[I,I2,O],
-                      fallback: Tee[I,I2,O] = halt,
-                      cleanup: Tee[I,I2,O] = halt): Tee[I,I2,O] =
+                      fallback: => Tee[I,I2,O] = halt,
+                      cleanup: => Tee[I,I2,O] = halt): Tee[I,I2,O] =
       await(R[I2]: Env[I,I2]#T[I2])(recv, fallback, cleanup)
   }
 }
