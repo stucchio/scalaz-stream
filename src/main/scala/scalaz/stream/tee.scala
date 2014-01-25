@@ -1,6 +1,9 @@
 package scalaz.stream
 
 import Process._
+import scalaz.\/._
+import scalaz.\/
+import scalaz.Free.Trampoline
 
 /**
  * Module of various `Tee` processes.
@@ -112,6 +115,26 @@ object tee extends tee {
   /** Feed one input to the right branch of this `Tee`. */
   def feed1R[I,I2,O](i2: I2)(t: Tee[I,I2,O]): Tee[I,I2,O] =
     wye.feed1R(i2)(t).asInstanceOf[Tee[I,I2,O]]
+
+  object AwaitL_ {
+    def unapply[I,I2,O](self: Tee[I,I2,O]):
+    Option[Throwable \/ I => Trampoline[Tee[I,I2,O]]] = {
+      self match {
+        case Await_(req,recv,_) if req.tag == 0 => Some(recv)
+        case _ => None
+      }
+    }
+  }
+
+  object AwaitR_ {
+    def unapply[I,I2,O](self: Tee[I,I2,O]):
+    Option[Throwable \/ I2 => Trampoline[Tee[I,I2,O]]] = {
+      self match {
+        case Await_(req,recv,_) if req.tag == 1 => Some(recv)
+        case _ => None
+      }
+    }
+  }
 
   object AwaitL {
     def unapply[I,I2,O](self: Tee[I,I2,O]):
