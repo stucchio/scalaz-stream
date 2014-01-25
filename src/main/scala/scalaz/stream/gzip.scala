@@ -38,26 +38,27 @@ trait gzip {
       crc <- if ((flags & 2) == 2) readShort map (_ => 2) else emit(0)
     } yield 10 + extra + name + comment + crc
 
-    def skipHeader(skipper: Process1[Byte, Int],
-                   c: Channel[Task, Array[Byte], Array[Byte]]): Channel[Task, Array[Byte], Array[Byte]] =
-      c match {
-        case Emit(Seq(), t) => t
-        case Emit(h, t) =>
-          Emit(((bs: Array[Byte]) => {
-            val fed = feed(bs)(skipper)
-            fed match {
-              case Emit(ns, _) =>
-                h.head(bs.drop(ns.sum))
-              case Await(_, _, _, _) => Task.now(Array[Byte]())
-              case Halt(e) => h.head(bs)
-            }
-          }) +: h.tail, skipHeader(skipper, t))
-        case Await(snd, rec, fo, cu) =>
-          Await(snd, (x:Any) => skipHeader(skipper, rec(x)), fo, cu)
-        case x => x
-      }
-
-    skipHeader(readHeader, inflate(bufferSize, true))
+//    def skipHeader(skipper: Process1[Byte, Int],
+//                   c: Channel[Task, Array[Byte], Array[Byte]]): Channel[Task, Array[Byte], Array[Byte]] =
+////      c match {
+//        case Emit(Seq(), t) => t
+//        case Emit(h, t) =>
+//          Emit(((bs: Array[Byte]) => {
+//            val fed = feed(bs)(skipper)
+//            fed match {
+//              case Emit(ns, _) =>
+//                h.head(bs.drop(ns.sum))
+//              case Await(_, _, _, _) => Task.now(Array[Byte]())
+//              case Halt(e) => h.head(bs)
+//            }
+//          }) +: h.tail, skipHeader(skipper, t))
+//        case Await(snd, rec, fo, cu) =>
+//          Await(snd, (x:Any) => skipHeader(skipper, rec(x)), fo, cu)
+//        case x => x
+//      }
+//
+//    skipHeader(readHeader, inflate(bufferSize, true))
+    ???
   }
 
   /**

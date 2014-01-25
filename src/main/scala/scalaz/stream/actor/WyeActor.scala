@@ -54,69 +54,70 @@ object WyeActor {
   final def runStepAsyncInterruptibly[O](p: Process[Task,O])(cb: Step[Task,O] => Unit): () => Unit = {
    
 
-    trait RunningTask {
-      def interrupt: Unit
-    }
-    case class RunningTaskImpl[A](val complete: Throwable \/ A => Unit) extends RunningTask {
-      def interrupt: Unit = complete(-\/(Interrupted))
-    }
+//    trait RunningTask {
+//      def interrupt: Unit
+//    }
+//    case class RunningTaskImpl[A](val complete: Throwable \/ A => Unit) extends RunningTask {
+//      def interrupt: Unit = complete(-\/(Interrupted))
+//    }
+//
+//    val interrupted = new AtomicBoolean(false)
+//    val runningTask = new AtomicReference[Option[RunningTask]](None)
+//
+//    def interrupt() = {
+//      interrupted.set(true)
+//      runningTask.getAndSet(None).foreach(_.interrupt)
+//    }
+//
+//    def clean(step: Step[Task,O]) = step match {
+//      case Step(head, h@Halt(_), c) if !c.isHalt => c.run.map(_ => Step(head, h, halt))
+//      case _ => Task.now(step)
+//    }
+//
+//    def go(cur: Process[Task,O], cleanup: Process[Task,O]): Task[Step[Task,O]] = {
+//      def onAwait[A](req: Task[A], recv: A => Process[Task,O], fb: Process[Task,O], c: Process[Task,O]): Task[Step[Task,O]] = {
+//        // We must ensure that the callback `cb` is called exactly once.
+//        //
+//        // There are currently two cases who calls the callback:
+//        // - Interruptible task successfully completes and calls the callback itself.
+//        // - Interruptible task is interrupted and it doesn't call the callback - we must call it.
+//        //
+//        // After https://github.com/scalaz/scalaz/issues/599 is resolved
+//        // interruptible task will always call the callback itself.
+//        Task.async[A] { (cb: Throwable \/ A => Unit) =>
+//          val running = RunningTaskImpl(cb)
+//          runningTask.set(Some(running))
+//          if (interrupted.get) interrupt()
+//          else req.runAsyncInterruptibly(r => runningTask.getAndSet(None).foreach(_ => running.complete(r)), interrupted)
+//        }.attempt.flatMap[Step[Task,O]] {
+//          case -\/(End) => go(fb,c)
+//          case -\/(e) => Task.now(Step(-\/(e), Halt(e), c))
+//          case \/-(a) =>
+//            try go(recv(a), c)
+//            catch { case e: Throwable => Task.now(Step(-\/(e), Halt(e), c)) }
+//        }
+//      }
+//
+//      cur match {
+//        case _ if interrupted.get => Task.now(Step(-\/(Interrupted), Halt(Interrupted), cleanup))
+//        // Don't run cleanup from the last `Await` when process halts normally.
+//        case h@Halt(e) => Task.now(Step(-\/(e), h, halt))
+//        case Emit(h, t) =>
+//          val (nh,nt) = t.unemit
+//          val hh = h ++ nh
+//          if (hh.isEmpty) go(nt, cleanup)
+//          else Task.now(Step(\/-(hh), nt, cleanup))
+//        case Await(req, recv, fb, c) => onAwait(req, recv, fb, c)
+//      }
+//    }
+//
+//    go(p, halt).flatMap(clean).runAsync {
+//      case \/-(step) => cb(step)
+//      case -\/(_) => () // Impossible - step is always computed.
+//    }
 
-    val interrupted = new AtomicBoolean(false)
-    val runningTask = new AtomicReference[Option[RunningTask]](None)
-
-    def interrupt() = {
-      interrupted.set(true)
-      runningTask.getAndSet(None).foreach(_.interrupt)
-    }
-
-    def clean(step: Step[Task,O]) = step match {
-      case Step(head, h@Halt(_), c) if !c.isHalt => c.run.map(_ => Step(head, h, halt))
-      case _ => Task.now(step)
-    }
-
-    def go(cur: Process[Task,O], cleanup: Process[Task,O]): Task[Step[Task,O]] = {
-      def onAwait[A](req: Task[A], recv: A => Process[Task,O], fb: Process[Task,O], c: Process[Task,O]): Task[Step[Task,O]] = {
-        // We must ensure that the callback `cb` is called exactly once.
-        //
-        // There are currently two cases who calls the callback:
-        // - Interruptible task successfully completes and calls the callback itself.
-        // - Interruptible task is interrupted and it doesn't call the callback - we must call it.
-        //
-        // After https://github.com/scalaz/scalaz/issues/599 is resolved
-        // interruptible task will always call the callback itself.
-        Task.async[A] { (cb: Throwable \/ A => Unit) =>
-          val running = RunningTaskImpl(cb)
-          runningTask.set(Some(running))
-          if (interrupted.get) interrupt()
-          else req.runAsyncInterruptibly(r => runningTask.getAndSet(None).foreach(_ => running.complete(r)), interrupted)
-        }.attempt.flatMap[Step[Task,O]] {
-          case -\/(End) => go(fb,c)
-          case -\/(e) => Task.now(Step(-\/(e), Halt(e), c))
-          case \/-(a) =>
-            try go(recv(a), c)
-            catch { case e: Throwable => Task.now(Step(-\/(e), Halt(e), c)) }
-        }
-      }
-
-      cur match {
-        case _ if interrupted.get => Task.now(Step(-\/(Interrupted), Halt(Interrupted), cleanup))
-        // Don't run cleanup from the last `Await` when process halts normally.
-        case h@Halt(e) => Task.now(Step(-\/(e), h, halt))
-        case Emit(h, t) =>
-          val (nh,nt) = t.unemit
-          val hh = h ++ nh
-          if (hh.isEmpty) go(nt, cleanup)
-          else Task.now(Step(\/-(hh), nt, cleanup))
-        case Await(req, recv, fb, c) => onAwait(req, recv, fb, c)
-      }
-    }
-
-    go(p, halt).flatMap(clean).runAsync {
-      case \/-(step) => cb(step)
-      case -\/(_) => () // Impossible - step is always computed.
-    }
-
-    interrupt
+//    interrupt
+    ???
   }
 
   trait WyeSide[A, L, R, O] {

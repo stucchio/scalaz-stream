@@ -115,10 +115,11 @@ object tee extends tee {
 
   object AwaitL {
     def unapply[I,I2,O](self: Tee[I,I2,O]):
-        Option[(I => Tee[I,I2,O], Tee[I,I2,O], Tee[I,I2,O])] = self match {
-      case Await(req,recv,fb,c) if req.tag == 0 => Some((recv.asInstanceOf[I => Tee[I,I2,O]], fb, c))
-      case _ => None
-    }
+        Option[(I => Tee[I,I2,O], Tee[I,I2,O], Tee[I,I2,O])] =  ???
+//      self match {
+//      case Await(req,recv,fb,c) if req.tag == 0 => Some((recv.asInstanceOf[I => Tee[I,I2,O]], fb, c))
+//      case _ => None
+//    }
     def apply[I,I2,O](recv: I => Tee[I,I2,O],
                       fallback: Tee[I,I2,O] = halt,
                       cleanup: Tee[I,I2,O] = halt): Tee[I,I2,O] =
@@ -126,10 +127,12 @@ object tee extends tee {
   }
   object AwaitR {
     def unapply[I,I2,O](self: Tee[I,I2,O]):
-        Option[(I2 => Tee[I,I2,O], Tee[I,I2,O], Tee[I,I2,O])] = self match {
-      case Await(req,recv,fb,c) if req.tag == 1 => Some((recv.asInstanceOf[I2 => Tee[I,I2,O]], fb, c))
-      case _ => None
-    }
+        Option[(I2 => Tee[I,I2,O], Tee[I,I2,O], Tee[I,I2,O])] = ???
+//
+//    self match {
+//      case Await(req,recv,fb,c) if req.tag == 1 => Some((recv.asInstanceOf[I2 => Tee[I,I2,O]], fb, c))
+//      case _ => None
+//    }
     def apply[I,I2,O](recv: I2 => Tee[I,I2,O],
                       fallback: Tee[I,I2,O] = halt,
                       cleanup: Tee[I,I2,O] = halt): Tee[I,I2,O] =

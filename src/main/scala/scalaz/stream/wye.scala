@@ -14,7 +14,7 @@ import scalaz.stream.ReceiveY.ReceiveR
 import scalaz.stream.Process.Halt
 import scalaz.stream.Process.Env
 import scalaz.stream.ReceiveY.HaltR
-import scalaz.stream.Process.Await
+//import scalaz.stream.Process.Await
 import scalaz.stream.ReceiveY.HaltL
 
 trait wye {
@@ -453,10 +453,11 @@ object wye extends wye {
 
   object AwaitL {
     def unapply[I,I2,O](self: Wye[I,I2,O]):
-        Option[(I => Wye[I,I2,O], Wye[I,I2,O], Wye[I,I2,O])] = self match {
-      case Await(req,recv,fb,c) if req.tag == 0 => Some((recv.asInstanceOf[I => Wye[I,I2,O]], fb, c))
-      case _ => None
-    }
+        Option[(I => Wye[I,I2,O], Wye[I,I2,O], Wye[I,I2,O])] = ???
+//    self match {
+//      case Await(req,recv,fb,c) if req.tag == 0 => Some((recv.asInstanceOf[I => Wye[I,I2,O]], fb, c))
+//      case _ => None
+//    }
     def apply[I,I2,O](recv: I => Wye[I,I2,O],
                       fallback: Wye[I,I2,O] = halt,
                       cleanup: Wye[I,I2,O] = halt): Wye[I,I2,O] =
@@ -464,10 +465,12 @@ object wye extends wye {
   }
   object AwaitR {
     def unapply[I,I2,O](self: Wye[I,I2,O]):
-        Option[(I2 => Wye[I,I2,O], Wye[I,I2,O], Wye[I,I2,O])] = self match {
-      case Await(req,recv,fb,c) if req.tag == 1 => Some((recv.asInstanceOf[I2 => Wye[I,I2,O]], fb, c))
-      case _ => None
-    }
+        Option[(I2 => Wye[I,I2,O], Wye[I,I2,O], Wye[I,I2,O])] = ???
+
+//      self match {
+//      case Await(req,recv,fb,c) if req.tag == 1 => Some((recv.asInstanceOf[I2 => Wye[I,I2,O]], fb, c))
+//      case _ => None
+//    }
     def apply[I,I2,O](recv: I2 => Wye[I,I2,O],
                       fallback: Wye[I,I2,O] = halt,
                       cleanup: Wye[I,I2,O] = halt): Wye[I,I2,O] =
@@ -475,10 +478,11 @@ object wye extends wye {
   }
   object AwaitBoth {
     def unapply[I,I2,O](self: Wye[I,I2,O]):
-        Option[(ReceiveY[I,I2] => Wye[I,I2,O], Wye[I,I2,O], Wye[I,I2,O])] = self match {
-      case Await(req,recv,fb,c) if req.tag == 2 => Some((recv.asInstanceOf[ReceiveY[I,I2] => Wye[I,I2,O]], fb, c))
-      case _ => None
-    }
+        Option[(ReceiveY[I,I2] => Wye[I,I2,O], Wye[I,I2,O], Wye[I,I2,O])] = ???
+//      self match {
+//      case Await(req,recv,fb,c) if req.tag == 2 => Some((recv.asInstanceOf[ReceiveY[I,I2] => Wye[I,I2,O]], fb, c))
+//      case _ => None
+//    }
     def apply[I,I2,O](recv: ReceiveY[I,I2] => Wye[I,I2,O],
                       fallback: Wye[I,I2,O] = halt,
                       cleanup: Wye[I,I2,O] = halt): Wye[I,I2,O] =
