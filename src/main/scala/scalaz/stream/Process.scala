@@ -1155,11 +1155,19 @@ object Process {
   }
 
   /**
-   * Special exception indicating normal termination. Throwing this
-   * exception results in control switching to the `fallback` case of
-   * whatever `Process` is being run.
+   * Special exception indicating normal termination due to
+   * input ('upstream') termination. An `Await` may respond to an `End`
+   * by switching to reads from a secondary source.
    */
   case object End extends Exception {
+    override def fillInStackTrace = this
+  }
+  /**
+   * Special exception indicating downstream termination.
+   * An `Await` should respond to a `Kill` by performing
+   * necessary cleanup actions, then halting.
+   */
+  case object Kill extends Exception {
     override def fillInStackTrace = this
   }
 
