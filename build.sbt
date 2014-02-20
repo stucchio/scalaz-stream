@@ -8,6 +8,7 @@ scalaVersion := "2.10.2"
 
 scalacOptions ++= Seq(
   "-feature",
+  "-unchecked",
   "-language:implicitConversions",
   "-language:higherKinds",
   "-language:existentials",
