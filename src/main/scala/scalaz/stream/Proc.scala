@@ -11,7 +11,7 @@ sealed trait Proc2[+F[_],+O] {
   final def drain: Proc2[F,Nothing] = this match {
     case h@Halt(_) => h
     case a@Await(_,_) => a.extend(_.drain)
-    case Emit(ht) => Suspend { ht.map(_._2.drain) }
+    case Emit(h,t) => suspend { t.drain }
     case Suspend(p) => Suspend { p.map(_.drain) }
   }
 
@@ -23,7 +23,7 @@ sealed trait Proc2[+F[_],+O] {
     case h@Halt(_) => h
     case a@Await(_,recv) => Suspend { recv(left(Kill)) }
     case Suspend(p) => Suspend { p.map(_.disconnect) }
-    case Emit(ht) => Suspend { ht.map(_._2.disconnect) }
+    case Emit(h,t) => suspend { emitAll(h) ++ t.disconnect }
   }
 
   /**
@@ -34,7 +34,7 @@ sealed trait Proc2[+F[_],+O] {
     this match {
       case h@Halt(e) => Try(f(e))
       case Suspend(p) => Suspend(p.map(_.onHalt(f)))
-      case Emit(ht) => Emit(ht.map { case (h,t) => (h, t.onHalt(f)) })
+      case Emit(h,t) => suspend { emitAll(h) ++ t.onHalt(f) }
       case a@Await(_,_) => a.extend(_.onHalt(f))
     }
 
@@ -68,9 +68,9 @@ sealed trait Proc2[+F[_],+O] {
       case h@Halt(_) => h
       case a@Await(_,_) => a.extend(_.flatMap(f))
       case Suspend(p) => Suspend(p.map(_.flatMap(f)))
-      case Emit(ht) => Emit(ht.flatMap { case (h,t) =>
-        asEmit { (h map f).foldLeft(t.flatMap(f))((acc,h) => h append acc) }
-      })
+      case Emit(h,t) => suspend {
+        (h map f).foldLeft(t.flatMap(f))((acc,h) => h append acc)
+      }
     }
 
   final def map[O2](f: O => O2): Proc2[F,O2] =
@@ -84,10 +84,10 @@ sealed trait Proc2[+F[_],+O] {
       case Await1(recv,fb,c) => this match {
         case Halt(End) => halt.pipe(fb.disconnect)
         case Halt(e) => fail(e).pipe(c)
-        case Emit(ht) => Suspend { ht.map { case (h, t) =>
+        case Emit(h,t) => suspend {
           if (h.nonEmpty) (emitAll(h.tail) ++ t) pipe (recv(h.head))
           else t.pipe(p2)
-        }}
+        }
         case a@Await(_,_) => a.extend(_.pipe(p2))
         case Suspend(p) => Suspend { p.map(_ pipe p2) }
       }
@@ -103,10 +103,10 @@ sealed trait Proc2[+F[_],+O] {
       case AwaitL(recv,fb,c) => this match {
         case Halt(End) => halt.tee(p2)(fb.disconnect)
         case Halt(e) => fail(e).tee(p2)(c)
-        case Emit(ht) => Suspend { ht.map { case (h, tl) =>
+        case Emit(h,tl) => suspend {
           if (h.nonEmpty) (emitAll(h.tail) ++ tl).tee(p2)(recv(h.head))
           else tl.tee(p2)(t)
-        }}
+        }
         case a@Await(_,_) => a.extend(_.tee(p2)(t))
         case Suspend(p) => Suspend { p.map(_.tee(p2)(t)) }
       }
@@ -115,7 +115,7 @@ sealed trait Proc2[+F[_],+O] {
         case Halt(e) => this.tee(fail(e))(c)
         // casts required since Scala seems to discard type of `p2` when
         // pattern matching on it - assigns `F2` and `O2` to `Any` in patterns
-        case e@Emit(_) => e.asInstanceOf[Emit[F2,O2]].extend {
+        case e@Emit(_,_) => e.asInstanceOf[Emit[F2,O2]].extend {
           (h: Seq[O2], tl: Proc2[F2,O2]) =>
             if (h.nonEmpty) this.tee(emitAll(h.tail) ++ tl)(recv(h.head))
             else this.tee(tl)(t)
@@ -148,13 +148,11 @@ object Proc2 {
       Await[F2,A,O2](req, e => Trampoline.suspend(recv(e)).map(f))
   }
 
-  case class Emit[F[_],O](
-    uncons: Trampoline[(Seq[O], Proc2[F,O])])
-    extends Proc2[F,O] {
+  case class Emit[F[_],O](head: Seq[O], tail: Proc2[F,O]) extends Proc2[F,O] {
 
     def extend[F2[x]>:F[x],O2](f: (Seq[O], Proc2[F,O]) => Proc2[F2,O2]):
         Proc2[F2,O2] =
-      Suspend { uncons.map { case (h, t) => f(h, t) } }
+      suspend { f(head, tail) }
   }
 
   case class Suspend[F[_],O](get: Trampoline[Proc2[F,O]]) extends Proc2[F,O]
@@ -177,13 +175,15 @@ object Proc2 {
     Halt(err)
 
   def emit[O](o: O): Proc2[Nothing,O] =
-    Emit[Nothing,O](Trampoline.now(Vector(o) -> halt))
+    Emit[Nothing,O](Vector(o), halt)
 
   def emitAll[O](s: Seq[O]): Proc2[Nothing,O] =
-    Emit[Nothing,O](Trampoline.now(s -> halt))
+    Emit[Nothing,O](s, halt)
 
-  def asEmit[F[_],O](p: => Proc2[F,O]): Trampoline[(Seq[O], Proc2[F,O])] =
-    Trampoline.delay((Vector.empty, p))
+  def emitSeq[F[_],O](
+      head: Seq[O],
+      tail: Proc2[F,O] = halt): Proc2[F,O] =
+    Emit[F,O](head, tail)
 
   def await[F[_],A,O](req: F[A])(recv: Throwable \/ A => Trampoline[Proc2[F,O]]):
       Proc2[F,O] =
