@@ -7,27 +7,29 @@ import scalaz.\/._
 sealed trait Proc2[+F[_],+O] {
   import Proc2._
 
-  final def flatMap[F2[x]>:F[x],O2](f: O => Proc2[F2,O2]): Proc2[F2,O2] =
-    this match {
-      case h@Halt(_) => h
-      case a@Await(_,_) => a.extend(_.flatMap(f))
-      case Suspend(p) => Suspend(p.map(_.flatMap(f)))
-      case Emit(ht) => Emit(ht.flatMap { case (h,t) =>
-        asEmit { (h map f).foldLeft(t.flatMap(f))((acc,h) => h append acc) }
-      })
-    }
+  /** Ignore all outputs of this `Process`. */
+  final def drain: Proc2[F,Nothing] = this match {
+    case h@Halt(_) => h
+    case a@Await(_,_) => a.extend(_.drain)
+    case Emit(ht) => Suspend { ht.map(_._2.drain) }
+    case Suspend(p) => Suspend { p.map(_.drain) }
+  }
 
-  final def map[O2](f: O => O2): Proc2[F,O2] =
-    flatMap { o => emit(f(o)) }
+  /** Send the `Kill` signal to the next `Await`, then ignore all outputs. */
+  final def kill: Proc2[F,Nothing] = this.disconnect.drain
 
-  final def append[F2[x]>:F[x],O2>:O](p2: => Proc2[F2,O2]): Proc2[F2,O2] =
-    onHalt {
-      case (End|Kill) => p2
-      case e => fail(e)
-    }
+  /** Causes subsequent await to fail with the `Kill` exception. */
+  final def disconnect: Proc2[F,O] = this match {
+    case h@Halt(_) => h
+    case a@Await(_,recv) => Suspend { recv(left(Kill)) }
+    case Suspend(p) => Suspend { p.map(_.disconnect) }
+    case Emit(ht) => Suspend { ht.map(_._2.disconnect) }
+  }
 
-  final def ++[F2[x]>:F[x],O2>:O](p2: => Proc2[F2,O2]): Proc2[F2,O2] = append(p2)
-
+  /**
+   * Replace the `Halt` at the end of this `Process` with whatever
+   * is produced by `f`.
+   */
   final def onHalt[F2[x]>:F[x],O2>:O](f: Throwable => Proc2[F2,O2]): Proc2[F2,O2] =
     this match {
       case h@Halt(e) => Try(f(e))
@@ -35,6 +37,13 @@ sealed trait Proc2[+F[_],+O] {
       case Emit(ht) => Emit(ht.map { case (h,t) => (h, t.onHalt(f)) })
       case a@Await(_,_) => a.extend(_.onHalt(f))
     }
+
+  final def append[F2[x]>:F[x],O2>:O](p2: => Proc2[F2,O2]): Proc2[F2,O2] =
+    onHalt {
+      case (End|Kill) => p2
+      case e => fail(e)
+    }
+  final def ++[F2[x]>:F[x],O2>:O](p2: => Proc2[F2,O2]): Proc2[F2,O2] = append(p2)
 
   final def onComplete[F2[x]>:F[x],O2>:O](p2: => Proc2[F2,O2]): Proc2[F2,O2] =
     onHalt {
@@ -48,24 +57,24 @@ sealed trait Proc2[+F[_],+O] {
   final def onFailure[F2[x]>:F[x],O2>:O](p2: => Proc2[F2,O2]): Proc2[F2,O2] =
     onHalt {
       case e@(End|Kill) => fail(e)
-      case e => p2
+      case e => p2.onHalt {
+        case (End|Kill) => fail(e)
+        case e2 => fail(Process.CausedBy(e2,e))
+      }
     }
 
-  final def drain: Proc2[F,Nothing] = this match {
-    case h@Halt(_) => h
-    case a@Await(_,_) => a.extend(_.drain)
-    case Emit(ht) => Suspend { ht.map(_._2.drain) }
-    case Suspend(p) => Suspend { p.map(_.drain) }
-  }
+  final def flatMap[F2[x]>:F[x],O2](f: O => Proc2[F2,O2]): Proc2[F2,O2] =
+    this match {
+      case h@Halt(_) => h
+      case a@Await(_,_) => a.extend(_.flatMap(f))
+      case Suspend(p) => Suspend(p.map(_.flatMap(f)))
+      case Emit(ht) => Emit(ht.flatMap { case (h,t) =>
+        asEmit { (h map f).foldLeft(t.flatMap(f))((acc,h) => h append acc) }
+      })
+    }
 
-  final def kill: Proc2[F,Nothing] = this.disconnect.drain
-
-  final def disconnect: Proc2[F,O] = this match {
-    case h@Halt(_) => h
-    case a@Await(_,recv) => Suspend { recv(left(Kill)) }
-    case Suspend(p) => Suspend { p.map(_.disconnect) }
-    case Emit(ht) => Suspend { ht.map(_._2.disconnect) }
-  }
+  final def map[O2](f: O => O2): Proc2[F,O2] =
+    flatMap { o => emit(f(o)) }
 
   final def pipe[O2](p2: Process1[O,O2]): Proc2[F,O2] = {
     import scalaz.stream.Process.{Await1, Emit => EmitP, Halt => HaltP}
@@ -123,6 +132,8 @@ sealed trait Proc2[+F[_],+O] {
 
 object Proc2 {
 
+  // We are just using `Task` for its exception-catching and trampolining,
+  // just defining local alias to avoid confusion
   type Trampoline[+A] = Task[A]
   val Trampoline = Task
 
