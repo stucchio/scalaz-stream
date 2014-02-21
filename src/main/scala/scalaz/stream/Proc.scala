@@ -1,8 +1,9 @@
 package scalaz.stream
 
 import scalaz.concurrent.Task
-import scalaz.\/
 import scalaz.\/._
+import scalaz._
+import scalaz.{Catchable,Monad,Monoid}
 
 sealed trait Proc2[+F[_],+O] {
   import Proc2._
@@ -26,15 +27,25 @@ sealed trait Proc2[+F[_],+O] {
     case Emit(h,t) => suspend { emitAll(h) ++ t.disconnect }
   }
 
+  /** Force any outer `Suspend` nodes in this `Process`. */
+  @annotation.tailrec
+  final def whnf: Proc2[F,O] = this match {
+    case Suspend(p) => p.attemptRun match {
+      case -\/(e) => fail(e)
+      case \/-(p) => p.whnf
+    }
+    case _ => this
+  }
+
   /**
    * Replace the `Halt` at the end of this `Process` with whatever
    * is produced by `f`.
    */
   final def onHalt[F2[x]>:F[x],O2>:O](f: Throwable => Proc2[F2,O2]): Proc2[F2,O2] =
     this match {
-      case h@Halt(e) => Try(f(e))
+      case h@Halt(e) => suspend { f(e) }
       case Suspend(p) => Suspend(p.map(_.onHalt(f)))
-      case Emit(h,t) => suspend { emitAll(h) ++ t.onHalt(f) }
+      case Emit(h,t) => suspend { emitSeq(h, t.onHalt(f)) }
       case a@Await(_,_) => a.extend(_.onHalt(f))
     }
 
@@ -127,6 +138,40 @@ sealed trait Proc2[+F[_],+O] {
         }
       }
     }
+  }
+
+  final def runFoldMap[F2[x]>:F[x], B](f: O => B)(implicit F: Monad[F2], C: Catchable[F2], B: Monoid[B]): F2[B] = {
+    def go(cur: Proc2[F2,O], acc: B): F2[B] =
+      cur.whnf match {
+        case Emit(h,t) =>
+          go(t.asInstanceOf[Proc2[F2,O]], h.asInstanceOf[Seq[O]].foldLeft(acc)((x, y) => B.append(x, f(y))))
+        case Halt(e) => e match {
+          case (End|Kill) => F.point(acc)
+          case _ => C.fail(e)
+        }
+        case Await(req,recv) =>
+           F.bind (C.attempt(req.asInstanceOf[F2[AnyRef]])) {
+             e => val next = recv(e).asInstanceOf[Trampoline[Proc2[F2,O]]]
+                  go(Suspend(next), acc)
+           }
+        case _ => sys.error("unpossible")
+      }
+    go(this, B.zero)
+  }
+
+  /**
+   * Collect the outputs of this `Process[F,O]`, given a `Monad[F]` in
+   * which we can catch exceptions. This function is not tail recursive and
+   * relies on the `Monad[F]` to ensure stack safety.
+   */
+  final def runLog[F2[x]>:F[x], O2>:O](implicit F: Monad[F2], C: Catchable[F2]): F2[IndexedSeq[O2]] = {
+    runFoldMap[F2,IndexedSeq[O2]](IndexedSeq(_))(
+      F, C,
+      // workaround for performance bug in Vector ++
+      Monoid.instance[IndexedSeq[O2]](
+        (a,b) => b.foldLeft(a)(_ :+ _),
+        IndexedSeq.empty)
+    )
   }
 }
 
