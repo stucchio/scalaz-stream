@@ -22,6 +22,10 @@ object Proc3Test extends App {
       (acc,h) => h ++ acc
     )
 
+  def badFlatMap(n: Int): Proc3[Task,Int] =
+    if (n == 0) halt
+    else emit(1).flatMap(_ => badFlatMap(n-1) ++ badFlatMap(n-1))
+
   implicit val B = Monoid.instance[Int]((a,b) => a+b, 0)
 
   println("bad")
@@ -41,5 +45,14 @@ object Proc3Test extends App {
   time { good(10000).runFoldMap(identity).run }
   time { good(100000).runFoldMap(identity).run }
   time { good(1000000).runFoldMap(identity).run }
+
+  //println("badFlatMap")
+  //time { badFlatMap(8).runFoldMap(identity).run }
+  //time { badFlatMap(9).runFoldMap(identity).run }
+  //time { badFlatMap(10).runFoldMap(identity).run }
+  //time { badFlatMap(11).runFoldMap(identity).run }
+  //time { badFlatMap(12).runFoldMap(identity).run }
+  //time { badFlatMap(13).runFoldMap(identity).run }
+  //time { badFlatMap(14).runFoldMap(identity).run }
 }
 
