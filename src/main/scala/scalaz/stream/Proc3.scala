@@ -4,26 +4,6 @@ import scalaz.{Catchable,Monad,Monoid}
 import scalaz.{\/, -\/, \/-}
 import scalaz.\/._
 
-/*
-  data Base f a
-    = Emit [a]
-    | forall r. Await (f r) (Either Err r -> a)
-
-  -- think this might do it, as long as we can write a tail-recursive
-  -- loop to interpret it
-
-  data Base f a
-    = Emit [a]
-    | Await (f a)
-    | Halt Err
-
-  data Proc f a
-    = More (() -> Proc f a)
-    | Done (Base f a)
-    | forall r. OnHalt (Base f r) (Err -> Proc f a)
-    | forall r. Bind (Base f r) (r -> Proc f a)
-*/
-
 import Proc3._
 
 sealed trait Proc3[+F[_],+O] {
@@ -123,7 +103,7 @@ object Proc3 {
       )
       case OnHalt(base, f) =>
         F.bind(suspend { go(base.asInstanceOf[Proc3[F,O]], acc) }) { eacc2 =>
-          go(f.asInstanceOf[Throwable => Proc3[F,O]].apply(eacc2._1), eacc2._2)
+          go(applySafe(f.asInstanceOf[Throwable => Proc3[F,O]])(eacc2._1), eacc2._2)
         }
       case Bind(base, f) => ???
     }
