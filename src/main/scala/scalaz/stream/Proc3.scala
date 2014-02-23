@@ -49,7 +49,7 @@ object Proc3 {
   sealed trait Base[+F[_],+O] extends Proc3[F,O] {
     private[stream] def runBind[F2[x]>:F[x],O2](f: O => Proc3[F2,O2])(implicit F: Monad[F2]):
         F2[Seq[Proc3[F2,O2]]] = this match {
-       case h@Halt(_) => F.point(Vector(h))
+       case h@Halt(_) => F.point(Vector.empty)
        case Await(req) => F.map(req)(f andThen (Vector(_)))
        case Emit(emits) => F.point(emits.map(f))
     }
@@ -108,7 +108,14 @@ object Proc3 {
         F.bind(suspend { go(base.asInstanceOf[Proc3[F,O]], acc) }) { eacc2 =>
           go(applySafe(f.asInstanceOf[Throwable => Proc3[F,O]])(eacc2._1), eacc2._2)
         }
-      case Bind(base, f) => ???
+      case Bind(base0, f0) =>
+        val base = base0.asInstanceOf[Base[F,Any]]
+        val f = f0.asInstanceOf[Any => Proc3[F,O]]
+        F.bind(base.runBind(f)) { ps: Seq[Proc3[F,O]] =>
+          if (ps.isEmpty) go(halt, acc)
+          else if (ps.size == 1) go(ps.head, acc)
+          else go(ps.reverse.reduceLeft((tl,hd) => hd ++ tl), acc)
+        }
     }
     finish(go(p, B.zero))
   }
