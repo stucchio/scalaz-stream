@@ -18,8 +18,29 @@ sealed trait Proc3[+F[_],+O] {
   final def flatMap[F2[x]>:F[x],O2](f: O => Proc3[F2,O2]): Proc3[F2,O2] =
     this match {
       case Bind(base, g) => suspend { Bind(base, g andThen (_.flatMap(f))) }
-      case OnHalt(p, g) => suspend { p.flatMap(f).onHalt(g andThen (_.flatMap(f))) }
-      case _ => Bind(this.asInstanceOf[Base[F,O]], f)
+      case _ => Bind(this.asInstanceOf[OHNF[F2,O]], f)
+    }
+
+  // onHalt normal form - we simply ensure that the outermost Process is not a Bind
+  final def ohnf[F2[x]>:F[x],O2>:O](implicit F: Monad[F2]): F2[OHNF[F2,O2]] =
+    this match {
+      case Bind(a,f) => F.bind (suspendF { a.ohnf[F2,Any] }) {
+        case h@Halt(_) => F.point(h)
+        case Emit(emits) =>
+          val procs = emits.map(f)
+          if (procs.isEmpty) F.point(halt)
+          else if (procs.size == 1) suspendF { f(procs.head).ohnf }
+          else suspendF { procs.reverse.reduceLeft((tl,hd) => hd ++ tl).ohnf }
+        case Await(req) => F.bind(req.asInstanceOf[F[Any]])(f andThen (_.ohnf[F2,O2]))
+        case Suspend(force) => suspendF { force().asInstanceOf[Proc3[F2,Any]].flatMap(f).ohnf }
+        case OnHalt(h0,t0) =>
+          suspendF {
+            val h = h0.asInstanceOf[Proc3[F2,Any]]
+            val t = t0.asInstanceOf[Throwable => Proc3[F2,Any]]
+            h.flatMap(f).onHalt(t andThen (_.flatMap(f))).ohnf
+          }
+      }
+      case _ => F.point(this.asInstanceOf[OHNF[F2,O2]])
     }
 
   final def map[O2](f: O => O2): Proc3[F,O2] =
@@ -46,23 +67,20 @@ sealed trait Proc3[+F[_],+O] {
 
 object Proc3 {
 
-  sealed trait Base[+F[_],+O] extends Proc3[F,O] {
-    private[stream] def runBind[F2[x]>:F[x],O2](f: O => Proc3[F2,O2])(implicit F: Monad[F2]):
-        F2[Seq[Proc3[F2,O2]]] = this match {
-       case h@Halt(_) => F.point(Vector.empty)
-       case Await(req) => F.map(req)(f andThen (Vector(_)))
-       case Emit(emits) => F.point(emits.map(f))
-    }
-  }
-  case class Emit[+O](head: Seq[O]) extends Base[Nothing,O]
-  case class Await[+F[_],O](req: F[O]) extends Base[F,O]
-  case class Halt(cause: Throwable) extends Base[Nothing,Nothing]
+  sealed trait OHNF[+F[_],+O] extends Proc3[F,O]
+  case class Emit[+O](head: Seq[O]) extends OHNF[Nothing,O]
+  case class Await[+F[_],O](req: F[O]) extends OHNF[F,O]
+  case class Halt(cause: Throwable) extends OHNF[Nothing,Nothing]
 
-  case class OnHalt[+F[_],+O](p: Proc3[F,O], f: Throwable => Proc3[F,O]) extends Proc3[F,O]
-  case class Bind[+F[_],R,O](p: Base[F,R], f: R => Proc3[F,O]) extends Proc3[F,O]
+  case class Suspend[+F[_],+O](force: () => Proc3[F,O]) extends OHNF[F,O]
+  case class OnHalt[+F[_],+O](p: Proc3[F,O], f: Throwable => Proc3[F,O]) extends OHNF[F,O]
+  case class Bind[+F[_],R,O](p: OHNF[F,R], f: R => Proc3[F,O]) extends Proc3[F,O]
+
+  def suspendF[F[_],A](f: => F[A])(implicit F: Monad[F]): F[A] =
+    F.bind(F.point(()))(_ => f)
 
   def suspend[F[_],O](p: => Proc3[F,O]): Proc3[F,O] =
-    OnHalt[F,O](Halt(End), t => p)
+    Suspend { () => p }
 
   val halt = Halt(End)
 
@@ -84,10 +102,9 @@ object Proc3 {
       case (e,_) => C.fail(e)
     }
 
-    def suspend[A](f: => F[A]): F[A] = F.bind(F.point(()))(_ => f)
     def delay[A](a: => A): F[A] = F.bind(F.point(()))(_ => F.point(a))
 
-    def go(p: Proc3[F,O], acc: B): F[(Throwable,B)] = p match {
+    def go(p: Proc3[F,O], acc: B): F[(Throwable,B)] = F.bind(p.ohnf) {
       case Halt(e) => F.point(e -> acc)
       case Emit(emits) => F.point {
         var acc2 = acc
@@ -105,17 +122,11 @@ object Proc3 {
         )
       )
       case OnHalt(base, f) =>
-        F.bind(suspend { go(base.asInstanceOf[Proc3[F,O]], acc) }) { eacc2 =>
+        F.bind(suspendF { go(base.asInstanceOf[Proc3[F,O]], acc) }) { eacc2 =>
           go(applySafe(f.asInstanceOf[Throwable => Proc3[F,O]])(eacc2._1), eacc2._2)
         }
-      case Bind(base0, f0) =>
-        val base = base0.asInstanceOf[Base[F,Any]]
-        val f = f0.asInstanceOf[Any => Proc3[F,O]]
-        F.bind(base.runBind(f)) { ps: Seq[Proc3[F,O]] =>
-          if (ps.isEmpty) go(halt, acc)
-          else if (ps.size == 1) go(ps.head, acc)
-          else go(ps.reverse.reduceLeft((tl,hd) => hd ++ tl), acc)
-        }
+      case Suspend(force) =>
+        suspendF { go(force().asInstanceOf[Proc3[F,O]], acc) }
     }
     finish(go(p, B.zero))
   }
