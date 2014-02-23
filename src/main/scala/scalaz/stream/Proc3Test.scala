@@ -22,9 +22,14 @@ object Proc3Test extends App {
       (acc,h) => h ++ acc
     )
 
-  def badFlatMap(n: Int): Proc3[Task,Int] =
+  def badFlatMap2(n: Int): Proc3[Task,Int] =
     if (n == 0) halt
-    else emit(1).flatMap(_ => badFlatMap(n-1) ++ badFlatMap(n-1))
+    else emit(1).flatMap(_ => badFlatMap2(n-1) ++ badFlatMap2(n-1))
+
+  // check for left-associated binds
+  def badFlatMap1(n: Int): Proc3[Task,Int] =
+    (0 to n).map(emit).foldLeft(halt: Proc3[Task,Int])((acc,h) =>
+      acc.flatMap(acc => h.map(h => acc + h)))
 
   implicit val B = Monoid.instance[Int]((a,b) => a+b, 0)
 
@@ -46,7 +51,14 @@ object Proc3Test extends App {
   time { good(100000).runFoldMap(identity).run }
   time { good(1000000).runFoldMap(identity).run }
 
-  //println("badFlatMap")
+  println("badFlatMap")
+  time { badFlatMap1(1).runFoldMap(identity).run }
+  time { badFlatMap1(10).runFoldMap(identity).run }
+  time { badFlatMap1(100).runFoldMap(identity).run }
+  time { badFlatMap1(1000).runFoldMap(identity).run }
+  time { badFlatMap1(10000).runFoldMap(identity).run }
+  time { badFlatMap1(100000).runFoldMap(identity).run }
+  time { badFlatMap1(1000000).runFoldMap(identity).run }
   //time { badFlatMap(8).runFoldMap(identity).run }
   //time { badFlatMap(9).runFoldMap(identity).run }
   //time { badFlatMap(10).runFoldMap(identity).run }
