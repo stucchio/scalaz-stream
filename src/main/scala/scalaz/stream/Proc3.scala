@@ -29,7 +29,6 @@ sealed trait Proc3[+F[_],+O] {
         case Emit(emits) =>
           val procs = emits.map(f)
           if (procs.isEmpty) F.point(halt)
-          else if (procs.size == 1) suspendF { f(procs.head).ohnf }
           else suspendF { procs.reverse.reduceLeft((tl,hd) => hd ++ tl).ohnf }
         case Await(req) => F.bind(req.asInstanceOf[F[Any]])(f andThen (_.ohnf[F2,O2]))
         case Suspend(force) => suspendF { force().asInstanceOf[Proc3[F2,Any]].flatMap(f).ohnf }

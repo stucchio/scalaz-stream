@@ -33,7 +33,7 @@ object Proc3Test extends App {
 
   implicit val B = Monoid.instance[Int]((a,b) => a+b, 0)
 
-  println("bad")
+  println("bad append")
   time { bad(1).runFoldMap(identity).run }
   time { bad(10).runFoldMap(identity).run }
   time { bad(100).runFoldMap(identity).run }
@@ -42,7 +42,7 @@ object Proc3Test extends App {
   time { bad(100000).runFoldMap(identity).run }
   time { bad(1000000).runFoldMap(identity).run }
 
-  println("good")
+  println("good append")
   time { good(1).runFoldMap(identity).run }
   time { good(10).runFoldMap(identity).run }
   time { good(100).runFoldMap(identity).run }
@@ -51,7 +51,7 @@ object Proc3Test extends App {
   time { good(100000).runFoldMap(identity).run }
   time { good(1000000).runFoldMap(identity).run }
 
-  println("badFlatMap")
+  println("bad flatMap 1")
   time { badFlatMap1(1).runFoldMap(identity).run }
   time { badFlatMap1(10).runFoldMap(identity).run }
   time { badFlatMap1(100).runFoldMap(identity).run }
@@ -59,12 +59,16 @@ object Proc3Test extends App {
   time { badFlatMap1(10000).runFoldMap(identity).run }
   time { badFlatMap1(100000).runFoldMap(identity).run }
   time { badFlatMap1(1000000).runFoldMap(identity).run }
-  //time { badFlatMap(8).runFoldMap(identity).run }
-  //time { badFlatMap(9).runFoldMap(identity).run }
-  //time { badFlatMap(10).runFoldMap(identity).run }
-  //time { badFlatMap(11).runFoldMap(identity).run }
-  //time { badFlatMap(12).runFoldMap(identity).run }
-  //time { badFlatMap(13).runFoldMap(identity).run }
-  //time { badFlatMap(14).runFoldMap(identity).run }
+
+  println("bad flatMap 2")
+  time { badFlatMap2(14).runFoldMap(identity).run }
+  time { badFlatMap2(15).runFoldMap(identity).run }
+  time { badFlatMap2(16).runFoldMap(identity).run }
+  time { badFlatMap2(17).runFoldMap(identity).run }
+  time { badFlatMap2(18).runFoldMap(identity).run }
+  time { badFlatMap2(19).runFoldMap(identity).run }
+  time { badFlatMap2(20).runFoldMap(identity).run }
+  time { badFlatMap2(21).runFoldMap(identity).run }
+  time { badFlatMap2(22).runFoldMap(identity).run }
 }
 
