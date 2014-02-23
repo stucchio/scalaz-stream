@@ -31,6 +31,14 @@ object Proc3Test extends App {
     (0 to n).map(emit).foldLeft(halt: Proc3[Task,Int])((acc,h) =>
       acc.flatMap(acc => h.map(h => acc + h)))
 
+  def worstCaseScenario(n: Int): Proc3[Task,Int] = {
+    @annotation.tailrec
+    def churn(p: Proc3[Task,Int], m: Int): Proc3[Task,Int] =
+      if (m == 0) p
+      else churn(p.flatMap(emit), m-1) // does nothing, but adds another flatMap
+    churn(bad(n),n)
+  }
+
   implicit val B = Monoid.instance[Int]((a,b) => a+b, 0)
 
   println("bad append")
@@ -70,5 +78,19 @@ object Proc3Test extends App {
   time { badFlatMap2(20).runFoldMap(identity).run }
   time { badFlatMap2(21).runFoldMap(identity).run }
   time { badFlatMap2(22).runFoldMap(identity).run }
+
+  println("worst case scenario")
+  time { worstCaseScenario(1).runFoldMap(identity).run }
+  time { worstCaseScenario(2).runFoldMap(identity).run }
+  time { worstCaseScenario(4).runFoldMap(identity).run }
+  time { worstCaseScenario(8).runFoldMap(identity).run }
+  time { worstCaseScenario(16).runFoldMap(identity).run }
+  time { worstCaseScenario(32).runFoldMap(identity).run }
+  time { worstCaseScenario(64).runFoldMap(identity).run }
+  time { worstCaseScenario(128).runFoldMap(identity).run }
+  time { worstCaseScenario(256).runFoldMap(identity).run }
+  time { worstCaseScenario(512).runFoldMap(identity).run }
+  time { worstCaseScenario(1024).runFoldMap(identity).run }
+  time { worstCaseScenario(2048).runFoldMap(identity).run }
 }
 
