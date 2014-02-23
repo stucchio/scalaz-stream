@@ -22,9 +22,12 @@ sealed trait Proc3[+F[_],+O] {
       case _ => Bind(this.asInstanceOf[Base[F,O]], f)
     }
 
+  final def map[O2](f: O => O2): Proc3[F,O2] =
+    flatMap(f andThen (emit))
+
   final def append[F2[x]>:F[x],O2>:O](p2: => Proc3[F2,O2]): Proc3[F2,O2] =
     onHalt {
-      case (End|Kill) => p2
+      case End => p2
       case e => fail(e)
     }
   final def ++[F2[x]>:F[x],O2>:O](p2: => Proc3[F2,O2]): Proc3[F2,O2] = append(p2)
