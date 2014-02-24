@@ -15,10 +15,10 @@ object Proc2Test extends App {
   }
 
   def bad(n: Int): Proc2[Task,Int] =
-    (0 to n).map(emit).foldLeft(halt: Proc2[Nothing,Int])(_ ++ _)
+    (0 to n).map(emit).foldLeft(emit(0))(_ ++ _)
 
   def good(n: Int): Proc2[Task,Int] =
-    (0 to n).map(emit).reverse.foldLeft(halt: Proc2[Nothing,Int])(
+    (0 to n).map(emit).reverse.foldLeft(emit(0))(
       (acc,h) => h ++ acc
     )
 
@@ -28,8 +28,17 @@ object Proc2Test extends App {
 
   // check for left-associated binds
   def badFlatMap1(n: Int): Proc2[Task,Int] =
-    (0 to n).map(emit).foldLeft(halt: Proc2[Task,Int])((acc,h) =>
+    (0 to n).map(emit).foldLeft(emit(0))((acc,h) =>
       acc.flatMap(acc => h.map(h => acc + h)))
+
+  // check for right-associated binds
+  def goodFlatMap1(n: Int): Proc2[Task,Int] =
+    (0 to n).reverse.foldLeft(emit(0))((acc,h) =>
+      acc.flatMap(acc => emit(h + acc)))
+
+  def goodFlatMap2(n: Int): Proc2[Task,Int] =
+    (0 to n).reverse.map(emit).foldLeft(emit(0))((acc,h) =>
+      h.flatMap(h => acc.map(_ + h)))
 
   def worstCaseScenario(n: Int): Proc2[Task,Int] = {
     @annotation.tailrec
@@ -46,10 +55,10 @@ object Proc2Test extends App {
   time { bad(10).runFoldMap(identity).run }
   time { bad(100).runFoldMap(identity).run }
   // takes forever due to quadratic complexity
-  // time { bad(1000).runFoldMap(identity).run }
-  // time { bad(10000).runFoldMap(identity).run }
-  // time { bad(100000).runFoldMap(identity).run }
-  // time { bad(1000000).runFoldMap(identity).run }
+  time { bad(1000).runFoldMap(identity).run }
+  time { bad(10000).runFoldMap(identity).run }
+  time { bad(100000).runFoldMap(identity).run }
+  time { bad(1000000).runFoldMap(identity).run }
 
   println("good append")
   time { good(1).runFoldMap(identity).run }
@@ -59,6 +68,24 @@ object Proc2Test extends App {
   time { good(10000).runFoldMap(identity).run }
   time { good(100000).runFoldMap(identity).run }
   time { good(1000000).runFoldMap(identity).run }
+
+  println("good flatMap 1")
+  time { goodFlatMap1(1).runFoldMap(identity).run }
+  time { goodFlatMap1(10).runFoldMap(identity).run }
+  time { goodFlatMap1(100).runFoldMap(identity).run }
+  time { goodFlatMap1(1000).runFoldMap(identity).run }
+  time { goodFlatMap1(10000).runFoldMap(identity).run }
+  time { goodFlatMap1(100000).runFoldMap(identity).run }
+  time { goodFlatMap1(1000000).runFoldMap(identity).run }
+
+  println("good flatMap 2")
+  time { goodFlatMap2(1).runFoldMap(identity).run }
+  time { goodFlatMap2(10).runFoldMap(identity).run }
+  time { goodFlatMap2(100).runFoldMap(identity).run }
+  time { goodFlatMap2(1000).runFoldMap(identity).run }
+  time { goodFlatMap2(10000).runFoldMap(identity).run }
+  time { goodFlatMap2(100000).runFoldMap(identity).run }
+  time { goodFlatMap2(1000000).runFoldMap(identity).run }
 
   println("bad flatMap 1")
   time { badFlatMap1(1).runFoldMap(identity).run }
@@ -78,18 +105,18 @@ object Proc2Test extends App {
   time { badFlatMap2(19).runFoldMap(identity).run }
   time { badFlatMap2(20).runFoldMap(identity).run }
   time { badFlatMap2(21).runFoldMap(identity).run }
-//
-//  println("worst case scenario")
-//  time { worstCaseScenario(1).runFoldMap(identity).run }
-//  time { worstCaseScenario(2).runFoldMap(identity).run }
-//  time { worstCaseScenario(4).runFoldMap(identity).run }
-//  time { worstCaseScenario(8).runFoldMap(identity).run }
-//  time { worstCaseScenario(16).runFoldMap(identity).run }
-//  time { worstCaseScenario(32).runFoldMap(identity).run }
-//  time { worstCaseScenario(64).runFoldMap(identity).run }
-//  time { worstCaseScenario(128).runFoldMap(identity).run }
-//  time { worstCaseScenario(256).runFoldMap(identity).run }
-//  time { worstCaseScenario(512).runFoldMap(identity).run }
-//  time { worstCaseScenario(1024).runFoldMap(identity).run }
-//  time { worstCaseScenario(2048).runFoldMap(identity).run }
+
+  println("worst case scenario")
+  time { worstCaseScenario(1).runFoldMap(identity).run }
+  time { worstCaseScenario(2).runFoldMap(identity).run }
+  time { worstCaseScenario(4).runFoldMap(identity).run }
+  time { worstCaseScenario(8).runFoldMap(identity).run }
+  time { worstCaseScenario(16).runFoldMap(identity).run }
+  time { worstCaseScenario(32).runFoldMap(identity).run }
+  time { worstCaseScenario(64).runFoldMap(identity).run }
+  time { worstCaseScenario(128).runFoldMap(identity).run }
+  time { worstCaseScenario(256).runFoldMap(identity).run }
+  time { worstCaseScenario(512).runFoldMap(identity).run }
+  time { worstCaseScenario(1024).runFoldMap(identity).run }
+  time { worstCaseScenario(2048).runFoldMap(identity).run }
 }

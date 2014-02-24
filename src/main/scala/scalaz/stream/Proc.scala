@@ -80,7 +80,7 @@ sealed trait Proc2[+F[_],+O] {
       case a@Await(_,_) => a.extend(_.flatMap(f))
       case Suspend(p) => Suspend(p.map(_.flatMap(f)))
       case Emit(h,t) => suspend {
-        (h map f).foldLeft(t.flatMap(f))((acc,h) => h append acc)
+        (h map f).reverse.foldLeft(t.flatMap(f))((tl,hd) => hd append tl)
       }
     }
 
