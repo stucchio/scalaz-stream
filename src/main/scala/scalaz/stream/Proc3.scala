@@ -79,13 +79,16 @@ object Proc3 {
     F.bind(F.point(()))(_ => f)
 
   def suspend[F[_],O](p: => Proc3[F,O]): Proc3[F,O] =
-    Suspend { () => p }
+    Suspend { () => try p catch { case e: Throwable => fail(e) } }
 
   val halt = Halt(End)
 
   def fail(err: Throwable): Proc3[Nothing,Nothing] = Halt(err)
 
   def emit[O](o: O): Proc3[Nothing,O] = Emit(Vector(o))
+
+  def emitAll[O](s: Seq[O]): Proc3[Nothing,O] =
+    Emit[O](s)
 
   def safely[F[_],A,B](f: A => Proc3[F,B]): A => Proc3[F,B] =
     (a: A) => try f(a) catch { case t: Throwable => fail(t) }
