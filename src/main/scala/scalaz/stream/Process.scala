@@ -648,9 +648,7 @@ object Process {
   case class MappedEmit[+F[_], A,+O](inSeq: Seq[A], f: A=>O) extends Process[F,O] {
     def wrap[O2](g: O => O2): Process[F,O2] = MappedEmit[F,A,O2](inSeq, (x:A) => g(f(x)))
 
-    def toSimpleProcess = proc.fold(x => x.toSimpleProcess, y => (y._1 ++ Process.fail(y._2)).toSimpleProcess)
-
-    private lazy val proc: Emit[O] \/ (Emit[O], Exception) = {
+    lazy val toSimpleProcess = {
       var err: Option[Exception] = None
       val result = new scala.collection.mutable.ListBuffer[O]()
       try {
@@ -659,9 +657,9 @@ object Process {
         case (e:Exception) => { err = Some(e) }
       }
       if (err.isEmpty) {
-        left(Emit(result.toSeq))
+        Emit(result.toSeq)
       } else {
-        right( (Emit(result.toSeq), err.get))
+        (Emit(result.toSeq) ++ Process.fail(err.get)).toSimpleProcess
       }
     }
   }
