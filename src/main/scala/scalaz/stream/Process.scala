@@ -33,7 +33,7 @@ sealed trait Process[+F[_], +O]
    */
   final def flatMap[F2[x] >: F[x], O2](f: O => Process[F2, O2]): Process[F2, O2] = {
     // Util.debug(s"FMAP $this")
-    this match {
+    this.toSimpleProcess match {
       case Halt(_) => this.asInstanceOf[Process[F2, O2]]
       case Emit(os) if os.isEmpty => this.asInstanceOf[Process[F2, O2]]
       case Emit(os) => os.tail.foldLeft(Try(f(os.head)))((p, n) => p ++ Try(f(n)))
@@ -46,20 +46,8 @@ sealed trait Process[+F[_], +O]
     this match {
       case Halt(_) => this.asInstanceOf[Process[F, O2]]
       case Emit(os) if os.isEmpty => this.asInstanceOf[Process[F, O2]]
-      case Emit(os) => {
-        var err: Option[Exception] = None
-        val result = new scala.collection.mutable.ListBuffer[O2]()
-        try {
-          os.foreach( x => { result += f(x) })
-        } catch {
-          case (e:Exception) => { err = Some(e) }
-        }
-        if (err.isEmpty) {
-          Process.emitAll(result.toSeq)
-        } else {
-          Process.emitAll(result.toSeq) ++ Process.fail(err.get)
-        }
-      }
+      case Emit(os) => MappedEmit(os,f)
+      case (me:MappedEmit[F,_,O]) => me.wrap(f)
       case aw@Await(_, _) => aw.extend(_ flatMap (o => emit(f(o))) )
       case ap@Append(p, n) => ap.extend(_ flatMap (o => emit(f(o))) )
     }
@@ -70,6 +58,8 @@ sealed trait Process[+F[_], +O]
    *     flatMap { o => emit(f(o))}
    */
 
+  final def map2[O2](f: O => O2): Process[F, O2] =
+    flatMap { o => emit(f(o))}
 
   /**
    * If this process halts due to `Cause.End`, runs `p2` after `this`.
@@ -129,7 +119,7 @@ sealed trait Process[+F[_], +O]
    */
   final def onHalt[F2[x] >: F[x], O2 >: O](f: Cause => Process[F2, O2]): Process[F2, O2] = {
      val next = (t: Cause) => Trampoline.delay(Try(f(t)))
-     this match {
+     this.toSimpleProcess match {
        case Append(h, stack) => Append(h, stack :+ next)
        case emt@Emit(_)      => Append(emt, Vector(next))
        case awt@Await(_, _)  => Append(awt, Vector(next))
@@ -313,7 +303,7 @@ sealed trait Process[+F[_], +O]
   /**
    * Returns true, if this process is halted
    */
-  final def isHalt: Boolean = this match {
+  final def isHalt: Boolean = this.toSimpleProcess match {
     case Halt(_) => true
     case _ => false
   }
@@ -322,7 +312,7 @@ sealed trait Process[+F[_], +O]
    * Skip the first part of the process and pretend that it ended with `early`.
    * The first part is the first `Halt` or the first `Emit` or request from the first `Await`.
    */
-  private[stream] final def injectCause(early: EarlyCause): Process[F, O] = (this match {
+  private[stream] final def injectCause(early: EarlyCause): Process[F, O] = (this.toSimpleProcess match {
     // Note: We cannot use `step` in the implementation since we want to inject `early` as soon as possible.
     // Eg. Let `q` be `halt ++ halt ++ ... ++ p`. `step` reduces `q` to `p` so if `injectCause` was implemented
     // by `step` then `q.injectCause` would be same as `p.injectCause`. But in our current implementation
@@ -534,11 +524,32 @@ sealed trait Process[+F[_], +O]
   final def run[F2[x] >: F[x]](implicit F: Monad[F2], C: Catchable[F2]): F2[Unit] =
     F.void(drain.runLog(F, C))
 
+  def toSimpleProcess: SimpleProcess[F,O]
 }
 
 
 object Process {
 
+  def benchmark {
+    val x = (1 to (1024*1024)).map(x => x.toLong).toSeq
+    println("map")
+    (Process.emitAll(x) : Process[Task,Long]).map(x => x % 7).map(x => x*x).map(x => x/2).run.run //warm up jvm
+    val startTimeMap = System.currentTimeMillis
+    (Process.emitAll(x) : Process[Task,Long]).map(x => x % 7).map(x => x*x).map(x => x/2).run.run
+    println("End time: " + (System.currentTimeMillis - startTimeMap))
+
+    println("map toSimple")
+    (Process.emitAll(x) : Process[Task,Long]).map(x => x % 7).toSimpleProcess.map(x => x*x).toSimpleProcess.map(x => x/2).run.run //warm up jvm
+    val startTimeMapS = System.currentTimeMillis
+    (Process.emitAll(x) : Process[Task,Long]).map(x => x % 7).toSimpleProcess.map(x => x*x).toSimpleProcess.map(x => x/2).run.run
+    println("End time: " + (System.currentTimeMillis - startTimeMapS))
+
+    println("map2")
+    (Process.emitAll(x) : Process[Task,Long]).map2(x => x % 7).map2(x => x*x).map2(x => x/2).run.run //warm up jvm
+    val startTimeMap2 = System.currentTimeMillis
+    (Process.emitAll(x) : Process[Task,Long]).map2(x => x % 7).map2(x => x*x).map2(x => x/2).run.run
+    println("End time: " + (System.currentTimeMillis - startTimeMap2))
+  }
 
   import scalaz.stream.Util._
 
@@ -551,10 +562,14 @@ object Process {
   type Trampoline[+A] = scalaz.Free.Trampoline[A]
   val Trampoline = scalaz.Trampoline
 
+  sealed trait SimpleProcess[+F[_],+O] extends Process[F,O] {
+    def toSimpleProcess: SimpleProcess[F,O] = this
+  }
+
   /**
    * Tags a state of process that has no appended tail, tha means can be Halt, Emit or Await
    */
-  sealed trait HaltEmitOrAwait[+F[_], +O] extends Process[F, O]
+  sealed trait HaltEmitOrAwait[+F[_], +O] extends SimpleProcess[F, O]
 
   object HaltEmitOrAwait {
 
@@ -636,7 +651,7 @@ object Process {
   case class Append[+F[_], +O](
     head: HaltEmitOrAwait[F, O]
     , stack: Vector[Cause => Trampoline[Process[F, O]]]
-    ) extends Process[F, O] {
+    ) extends SimpleProcess[F, O] {
 
     /**
      * Helper to modify the head and appended processes
@@ -653,6 +668,28 @@ object Process {
 
   }
 
+
+  case class MappedEmit[+F[_], A,+O](inSeq: Seq[A], f: A=>O) extends Process[F,O] {
+    def wrap[O2](g: O => O2): Process[F,O2] = MappedEmit[F,A,O2](inSeq, (x:A) => g(f(x)))
+
+    def toSimpleProcess = proc.fold(x => x.toSimpleProcess, y => (y._1 ++ Process.fail(y._2)).toSimpleProcess)
+
+    private lazy val proc: Emit[O] \/ (Emit[O], Exception) = {
+      println("Running mapped emit")
+      var err: Option[Exception] = None
+      val result = new scala.collection.mutable.ListBuffer[O]()
+      try {
+        inSeq.foreach( x => { result += f(x) })
+      } catch {
+        case (e:Exception) => { err = Some(e) }
+      }
+      if (err.isEmpty) {
+        left(Emit(result.toSeq))
+      } else {
+        right( (Emit(result.toSeq), err.get))
+      }
+    }
+  }
   /**
    * Marker trait representing next step of process or terminated process in `Halt`
    */
@@ -685,7 +722,7 @@ object Process {
      */
     def prepend[F2[x] >: F[x], O2 >: O](p: Process[F2, O2]): Process[F2, O2] = {
       if (stack.isEmpty) p
-      else p match {
+      else p.toSimpleProcess match {
         case app: Append[F2@unchecked, O2@unchecked] => Append[F2, O2](app.head, app.stack fast_++ stack)
         case emt: Emit[O2@unchecked] => Append(emt, stack)
         case awt: Await[F2@unchecked, _, O2@unchecked] => Append(awt, stack)
