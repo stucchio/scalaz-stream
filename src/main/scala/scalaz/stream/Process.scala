@@ -58,9 +58,6 @@ sealed trait Process[+F[_], +O]
    *     flatMap { o => emit(f(o))}
    */
 
-  final def map2[O2](f: O => O2): Process[F, O2] =
-    flatMap { o => emit(f(o))}
-
   /**
    * If this process halts due to `Cause.End`, runs `p2` after `this`.
    * Otherwise halts with whatever caused `this` to `Halt`.
@@ -530,27 +527,6 @@ sealed trait Process[+F[_], +O]
 
 object Process {
 
-  def benchmark {
-    val x = (1 to (1024*1024)).map(x => x.toLong).toSeq
-    println("map")
-    (Process.emitAll(x) : Process[Task,Long]).map(x => x % 7).map(x => x*x).map(x => x/2).run.run //warm up jvm
-    val startTimeMap = System.currentTimeMillis
-    (Process.emitAll(x) : Process[Task,Long]).map(x => x % 7).map(x => x*x).map(x => x/2).run.run
-    println("End time: " + (System.currentTimeMillis - startTimeMap))
-
-    println("map toSimple")
-    (Process.emitAll(x) : Process[Task,Long]).map(x => x % 7).toSimpleProcess.map(x => x*x).toSimpleProcess.map(x => x/2).run.run //warm up jvm
-    val startTimeMapS = System.currentTimeMillis
-    (Process.emitAll(x) : Process[Task,Long]).map(x => x % 7).toSimpleProcess.map(x => x*x).toSimpleProcess.map(x => x/2).run.run
-    println("End time: " + (System.currentTimeMillis - startTimeMapS))
-
-    println("map2")
-    (Process.emitAll(x) : Process[Task,Long]).map2(x => x % 7).map2(x => x*x).map2(x => x/2).run.run //warm up jvm
-    val startTimeMap2 = System.currentTimeMillis
-    (Process.emitAll(x) : Process[Task,Long]).map2(x => x % 7).map2(x => x*x).map2(x => x/2).run.run
-    println("End time: " + (System.currentTimeMillis - startTimeMap2))
-  }
-
   import scalaz.stream.Util._
 
   //////////////////////////////////////////////////////////////////////////////////////
@@ -675,7 +651,6 @@ object Process {
     def toSimpleProcess = proc.fold(x => x.toSimpleProcess, y => (y._1 ++ Process.fail(y._2)).toSimpleProcess)
 
     private lazy val proc: Emit[O] \/ (Emit[O], Exception) = {
-      println("Running mapped emit")
       var err: Option[Exception] = None
       val result = new scala.collection.mutable.ListBuffer[O]()
       try {
